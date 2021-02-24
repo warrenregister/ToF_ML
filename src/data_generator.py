@@ -60,7 +60,7 @@ class DataGenerator():
         Using channels, slope, offset, and start time calibrates each spectras
         data and adds intensity, mass, and channel rows to returned dataframe.
         '''
-        df = self._data
+        df = self._data.copy()
         if error:
             df = self.error_df(low_proportion, high_proportion, use_ranges, ranges, cat)
         if 'peaks' not in df.columns:
