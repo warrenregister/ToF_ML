@@ -186,7 +186,7 @@ def get_min_peaks(err_data):
 
 def get_precise_peaks(df, names):
     '''
-    Return list of peaks and intensities from dataframe of precise peaks.
+    Return list of peaks channels and intensities from dataframe of precise peaks.
     '''
     all_peaks = []
     for row in df.iterrows():
