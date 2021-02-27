@@ -524,3 +524,71 @@ def augment_value(value, amount=0.1, sign=-1):
     itself based on sign.
     '''
     return value + sign * amount * value
+
+
+def get_hydrocarbs(max_num_carbs):
+    carbon = 12
+    hydrogen = 1.00782
+    hydrocarbs = []
+    for c in range(1, max_num_carbs):
+        hydrocarbs.append(c * carbon + (2 * c + 1) * hydrogen)
+
+    expanded_hydrocarbs = []
+    for i, hydrocarb in enumerate(hydrocarbs):
+        expanded_hydrocarbs.append(hydrocarb)
+        if i < len(hydrocarbs) - 1:
+            prev = hydrocarb
+            diff = .01564
+            dist = int(hydrocarbs[i+1]) - int(hydrocarb) - 1
+            for num in range(dist):
+                mass = prev + 1 + diff / dist
+                expanded_hydrocarbs.append(mass)
+                prev = mass
+    return expanded_hydrocarbs
+
+
+def get_ranges(isotope_data, length):
+    '''
+    Computes no mans land spectras.
+    '''
+    ranges = [[x, x + 1] for x in range(length)]
+    for masses in isotope_data['Isotope Masses']:
+        for mass in masses:
+            i = int(mass)
+            if mass < 209.9871:
+                if round(mass) == i + 1 and mass < ranges[i][1]:
+                    ranges[i][1] = mass
+                elif round(mass) == i and mass > ranges[i][0]:
+                    ranges[i][0] = mass
+            else:
+                ranges[i][0] = mass
+                ranges[i][1] = i + .9871
+    return ranges
+
+
+def get_peak_suspiciousness(masses, ranges, show_correct_peaks=False):
+    '''
+    Returns list of how suspicious peaks are, how far into no mans land they are.
+    '''
+    susses = []
+    for mass in masses:
+        range = ranges[int(mass)]
+        val = min(abs(mass - range[0]), abs(mass - range[1]))
+        if mass > range[0] and mass < range[1]:
+            susses.append(val)
+        elif show_correct_peaks:
+            val = -1 * min(abs(mass - range[0]), abs(mass-range[1]))
+            susses.append(val)
+        else:
+            susses.append(0)
+    return susses
+
+
+def get_suspicious_peaks(masses, ranges, thresh=0.1):
+    '''
+    Returns all peaks with suspiciousness above threshold value
+    '''
+    susses = get_peak_suspiciousness(masses, ranges, False)
+    a = np.array(masses)
+    b = np.array(susses)
+    return a[(b > thresh) & (a < 800)]
