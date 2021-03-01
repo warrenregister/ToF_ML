@@ -566,7 +566,7 @@ def get_ranges(isotope_data, length):
     return ranges
 
 
-def get_peak_suspiciousness(masses, ranges, show_correct_peaks=False):
+def get_peak_suspiciousness(masses, ranges, show_correct_peaks=False, proportions=False):
     '''
     Returns list of how suspicious peaks are, how far into no mans land they are.
     '''
@@ -574,13 +574,20 @@ def get_peak_suspiciousness(masses, ranges, show_correct_peaks=False):
     for mass in masses:
         range = ranges[int(mass)]
         val = min(abs(mass - range[0]), abs(mass - range[1]))
-        if mass > range[0] and mass < range[1]:
-            susses.append(val)
-        elif show_correct_peaks:
-            val = -1 * min(abs(mass - range[0]), abs(mass-range[1]))
-            susses.append(val)
+        if not proportions:
+            if mass > range[0] and mass < range[1]:
+                susses.append(val)
+            elif show_correct_peaks:
+                val = -1 * min(abs(mass - range[0]), abs(mass-range[1]))
+                susses.append(val)
+            else:
+                susses.append(0)
         else:
-            susses.append(0)
+            range_size = range[1] - range[0]
+            if mass > range[0] and mass < range[1]:
+                susses.append(val / range_size)
+            else: susses.append(0)
+
     return susses
 
 
