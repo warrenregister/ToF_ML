@@ -17,7 +17,7 @@ def add_error(number, modifier=2, tens=2, threshold=0.5):
     Error calculated : (random num between 0 and 1 / modifier) / ten**tens
     '''
     randoms = np.random.rand(2)
-    error = (randoms[0] / modifier) / 10**tens
+    error = (1 - randoms[0] / modifier) / 10**tens
     new_num = 0
     if randoms[1] < threshold:
         new_num  = number - number * error
@@ -106,7 +106,7 @@ def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6],
     return err_data
 
 
-def mass_formula(channel, spec_bin_size,start_time,  mass_over_time, mass_offset):
+def mass_formula(channel, spec_bin_size, start_time,  mass_over_time, mass_offset):
     '''
     Apply formula for calculating mass at a channel.
     '''
@@ -367,6 +367,10 @@ def get_isotope_data(path='../data/Elements.txt'):
             freqs.append(element_freqs)
     isotope_data = pd.DataFrame(list(zip(elements, spots, freqs)),
      columns=['Element', 'Isotope Masses', 'Isotope Frequencies'])
+    hydrocarbs = get_hydrocarbs(51)
+    df = pd.DataFrame(columns=['Element', 'Isotope Masses', 'Isotope Frequencies'])
+    df.loc[0] = ['hydrocarbs', hydrocarbs, None]
+    isotope_data = isotope_data.append(df)
 
     return isotope_data
 
@@ -599,3 +603,21 @@ def get_suspicious_peaks(masses, ranges, thresh=0.1):
     a = np.array(masses)
     b = np.array(susses)
     return a[(b > thresh) & (a < 800)]
+
+
+def get_xs(data, x=12, thresh=0.1):
+    '''
+    Get all peaks in data near a specific mass x.
+    '''
+    xs = []
+    for row in data.itertuples():
+        row_x = -1
+        max = -1
+        for i, mass in enumerate(row.masses):
+            dif = abs(mass-x)
+            inten = row.intensities[i]
+            if dif < thresh and (inten > max or max == -1):
+                max = inten
+                row_x = dif
+        xs.append(row_x)
+    return xs

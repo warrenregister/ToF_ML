@@ -9,7 +9,7 @@ def main():
     generate_csv()
 
 
-def generate_csv(dir='/Users/warren/Desktop/Phi/TOF_ML/CdbSpectra/'):
+def generate_csv(dir='/Users/warren/Desktop/Phi/TOF_ML/data/CdbSpectra/'):
 	i = 0
 	df = None
 	for file_path in os.listdir(dir):
