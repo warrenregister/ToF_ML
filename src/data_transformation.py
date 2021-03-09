@@ -29,7 +29,7 @@ def add_error(number, modifier=2, tens=2, threshold=0.5, sub_one=False):
     return new_num, error
 
 
-def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6], slope_cat=False, sub_one):
+def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6], slope_cat=False, sub_one=False):
     '''
     Takes calibrated ToF-MS data and adds error to the offset and mass. If use_ranges returns
     multiclass classification dataset 0: no error, 1: offset error, 2: slope error, 3: both.
