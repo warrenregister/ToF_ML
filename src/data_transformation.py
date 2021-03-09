@@ -11,13 +11,15 @@ from sklearn.decomposition import PCA
 
 
 
-def add_error(number, modifier=2, tens=2, threshold=0.5):
+def add_error(number, modifier=2, tens=2, threshold=0.5, sub_one=False):
     '''
     Add or subtract a random amount of error based on the modifer and tens variables.
     Error calculated : (random num between 0 and 1 / modifier) / ten**tens
     '''
     randoms = np.random.rand(2)
-    error = (1 - randoms[0] / modifier) / 10**tens
+    error = (randoms[0] / modifier) / 10**tens
+    if sub_one:
+        error = (1 - randoms[0] / modifier) / 10**tens
     new_num = 0
     if randoms[1] < threshold:
         new_num  = number - number * error
@@ -27,7 +29,7 @@ def add_error(number, modifier=2, tens=2, threshold=0.5):
     return new_num, error
 
 
-def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6], slope_cat=False):
+def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6], slope_cat=False, sub_one):
     '''
     Takes calibrated ToF-MS data and adds error to the offset and mass. If use_ranges returns
     multiclass classification dataset 0: no error, 1: offset error, 2: slope error, 3: both.
@@ -52,7 +54,7 @@ def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6],
         if use_ranges:
             if num < ranges[0]: #slope only
                 target.append(2)
-                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier)
+                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_slope.append(sl_err)
                 new_slope.append(slope)
                 new_offset.append(row.MassOffset)
@@ -62,16 +64,16 @@ def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6],
                     target.append(2)
                 else:
                     target.append(3)
-                offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier)
+                offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_offset.append(off_err)
                 new_offset.append(offset)
-                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier)
+                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_slope.append(sl_err)
                 new_slope.append(slope)
             elif num >= ranges[1] and num < ranges[2]: # offset only
                 target.append(1)
                 error_percent_slope.append(0)
-                offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier)
+                offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_offset.append(off_err)
                 new_offset.append(offset)
                 new_slope.append(row[4])
@@ -84,10 +86,10 @@ def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6],
         else:
             if num < 0.5:
                 target.append(0)
-                offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier)
+                offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_offset.append(off_err)
                 new_offset.append(offset)
-                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier)
+                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_slope.append(sl_err)
                 new_slope.append(slope)
             else:
@@ -551,22 +553,21 @@ def get_hydrocarbs(max_num_carbs):
     return expanded_hydrocarbs
 
 
-def get_ranges(isotope_data, length):
+def get_ranges(frags, length, max = 235):
     '''
     Computes no mans land spectras.
     '''
     ranges = [[x, x + 1] for x in range(length)]
-    for masses in isotope_data['Isotope Masses']:
-        for mass in masses:
-            i = int(mass)
-            if mass < 209.9871:
-                if round(mass) == i + 1 and mass < ranges[i][1]:
-                    ranges[i][1] = mass
-                elif round(mass) == i and mass > ranges[i][0]:
-                    ranges[i][0] = mass
-            else:
+    for mass in frags:
+        i = int(mass)
+        if mass < 235.043933:
+            if round(mass) == i + 1 and mass < ranges[i][1]:
+                ranges[i][1] = mass
+            elif round(mass) == i and mass > ranges[i][0]:
                 ranges[i][0] = mass
-                ranges[i][1] = i + .9871
+        else:
+            ranges[i][0] = mass
+            ranges[i][1] = i + .9871
     return ranges
 
 
@@ -621,3 +622,17 @@ def get_xs(data, x=12, thresh=0.1):
                 row_x = dif
         xs.append(row_x)
     return xs
+
+
+def get_frags(loc='../data/FragLibData32_Converted2010 (1)/Fragment Table.csv'):
+    df = pd.read_csv(loc)
+    a = list(df.columns[0:])
+    a[0] = float(a[0])
+    a[-1] = int(a[-1])
+    a[-2] = a[-2][0]
+    df.columns = ['FragmentMass', 'FragmentLabel', 'Isotopes', 'Formula', 'FragmentID']
+    b = {'FragmentMass': a[0], 'FragmentLabel': a[1], 'Isotopes':a[2] , 'Formula':a[3],'FragmentID':a[4]}
+    df = pd.concat([pd.DataFrame(b, index=[0]), df], sort=False)
+    return df
+
+
