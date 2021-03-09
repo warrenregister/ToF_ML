@@ -29,7 +29,7 @@ def add_error(number, modifier=2, tens=2, threshold=0.5, sub_one=False):
     return new_num, error
 
 
-def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6], slope_cat=False):
+def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6], slope_cat=False, sub_one):
     '''
     Takes calibrated ToF-MS data and adds error to the offset and mass. If use_ranges returns
     multiclass classification dataset 0: no error, 1: offset error, 2: slope error, 3: both.
@@ -54,7 +54,7 @@ def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6],
         if use_ranges:
             if num < ranges[0]: #slope only
                 target.append(2)
-                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier)
+                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_slope.append(sl_err)
                 new_slope.append(slope)
                 new_offset.append(row.MassOffset)
@@ -64,16 +64,16 @@ def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6],
                     target.append(2)
                 else:
                     target.append(3)
-                offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier)
+                offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_offset.append(off_err)
                 new_offset.append(offset)
-                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier)
+                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_slope.append(sl_err)
                 new_slope.append(slope)
             elif num >= ranges[1] and num < ranges[2]: # offset only
                 target.append(1)
                 error_percent_slope.append(0)
-                offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier)
+                offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_offset.append(off_err)
                 new_offset.append(offset)
                 new_slope.append(row[4])
@@ -86,10 +86,10 @@ def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6],
         else:
             if num < 0.5:
                 target.append(0)
-                offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier)
+                offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_offset.append(off_err)
                 new_offset.append(offset)
-                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier)
+                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_slope.append(sl_err)
                 new_slope.append(slope)
             else:
