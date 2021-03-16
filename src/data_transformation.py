@@ -553,21 +553,22 @@ def get_hydrocarbs(max_num_carbs):
     return expanded_hydrocarbs
 
 
-def get_ranges(frags, length, max = 235):
+def get_ranges(mass_lists, length, max = 235):
     '''
     Computes no mans land spectras.
     '''
     ranges = [[x, x + 1] for x in range(length)]
-    for mass in frags:
-        i = int(mass)
-        if mass < 235.043933:
-            if round(mass) == i + 1 and mass < ranges[i][1]:
-                ranges[i][1] = mass
-            elif round(mass) == i and mass > ranges[i][0]:
+    for masses in mass_lists:
+        for mass in masses:
+            i = int(mass)
+            if mass < 235.043933:
+                if round(mass) == i + 1 and mass < ranges[i][1]:
+                    ranges[i][1] = mass
+                elif round(mass) == i and mass > ranges[i][0]:
+                    ranges[i][0] = mass
+            else:
                 ranges[i][0] = mass
-        else:
-            ranges[i][0] = mass
-            ranges[i][1] = i + .9871
+                ranges[i][1] = i + .9871
     return ranges
 
 
