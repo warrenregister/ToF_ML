@@ -132,10 +132,10 @@ def generate_calibrated_data(data):
         m_over_t = row[4]
         m_offset = row.MassOffset
         time = row.StartFlightTime
-        for tup in row.peaks:
-            mass.append(mass_formula(tup[0], spec, time, m_over_t, m_offset))
-            channel.append(tup[0])
-            intensity.append(tup[1])
+        for i, tup in enumerate(row.channels):
+            mass.append(mass_formula(tup, spec, time, m_over_t, m_offset))
+            channel.append(tup)
+            intensity.append(row.intensities[i])
         intensities.append(intensity)   
         masses.append(mass)
         channels.append(channel)

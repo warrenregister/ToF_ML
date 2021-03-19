@@ -63,8 +63,6 @@ class DataGenerator():
         df = self._data.copy()
         if error:
             df = self.error_df(low_proportion, high_proportion, use_ranges, ranges, cat)
-        if 'peaks' not in df.columns:
-            df['peaks'] = self.get_peak_data()
         return generate_calibrated_data(df)
     
     def get_peak_data(self):
