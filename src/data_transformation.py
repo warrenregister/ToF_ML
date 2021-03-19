@@ -29,7 +29,7 @@ def add_error(number, modifier=2, tens=2, threshold=0.5, sub_one=False):
     return new_num, error
 
 
-def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6], slope_cat=False, sub_one=False):
+def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6], slope_cat=False, sub_one=False, slope_index=4):
     '''
     Takes calibrated ToF-MS data and adds error to the offset and mass. If use_ranges returns
     multiclass classification dataset 0: no error, 1: offset error, 2: slope error, 3: both.
@@ -54,7 +54,7 @@ def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6],
         if use_ranges:
             if num < ranges[0]: #slope only
                 target.append(2)
-                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier, sub_one=sub_one)
+                slope, sl_err = add_error(row[slope_index], tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_slope.append(sl_err)
                 new_slope.append(slope)
                 new_offset.append(row.MassOffset)
@@ -67,7 +67,7 @@ def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6],
                 offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_offset.append(off_err)
                 new_offset.append(offset)
-                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier, sub_one=sub_one)
+                slope, sl_err = add_error(row[slope_index], tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_slope.append(sl_err)
                 new_slope.append(slope)
             elif num >= ranges[1] and num < ranges[2]: # offset only
@@ -76,12 +76,12 @@ def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6],
                 offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_offset.append(off_err)
                 new_offset.append(offset)
-                new_slope.append(row[4])
+                new_slope.append(row[slope_index])
             else:
                 target.append(0)
                 error_percent_slope.append(0)
                 error_percent_offset.append(0)
-                new_slope.append(row[4])
+                new_slope.append(row[slope_index])
                 new_offset.append(row.MassOffset)
         else:
             if num < 0.5:
@@ -89,14 +89,14 @@ def generate_data(data, tens, modifier, use_ranges=False, ranges=[0.2, 0.4, .6],
                 offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_offset.append(off_err)
                 new_offset.append(offset)
-                slope, sl_err = add_error(row[4], tens=tens, modifier=modifier, sub_one=sub_one)
+                slope, sl_err = add_error(row[slope_index], tens=tens, modifier=modifier, sub_one=sub_one)
                 error_percent_slope.append(sl_err)
                 new_slope.append(slope)
             else:
                 target.append(1)
                 error_percent_slope.append(0)
                 error_percent_offset.append(0)
-                new_slope.append(row[4])
+                new_slope.append(row[slope_index])
                 new_offset.append(row.MassOffset)
         
         
@@ -115,33 +115,25 @@ def mass_formula(channel, spec_bin_size, start_time,  mass_over_time, mass_offse
     return ((channel * .001 * spec_bin_size + start_time) * mass_over_time + mass_offset)**2
 
 
-def generate_calibrated_data(data):
+def generate_calibrated_data(data, slope_index=4):
     '''
     Applies mass_formula to every row in dataset to allow
     calibrated graphs to be generated.
     '''
     new_data = data.copy()
     masses = []
-    channels = []
-    intensities = []
     for row in new_data.itertuples():
         mass = []
         channel = []
         intensity = []
         spec = row.SpecBinSize
-        m_over_t = row[4]
+        m_over_t = row[slope_index]
         m_offset = row.MassOffset
         time = row.StartFlightTime
         for i, tup in enumerate(row.channels):
             mass.append(mass_formula(tup, spec, time, m_over_t, m_offset))
-            channel.append(tup)
-            intensity.append(row.intensities[i])
-        intensities.append(intensity)   
         masses.append(mass)
-        channels.append(channel)
-    new_data['mass_channels'] = channels
     new_data['masses'] = masses
-    new_data['intensities'] = intensities
     return new_data
 
 
@@ -309,7 +301,7 @@ def get_dist_nom_mass(peak, nom_masses):
 
 
 def get_error_masses(dataframe, avgs_only=True,
- func=get_dist_from_int, args=None, add_to='both'):
+ func=get_dist_from_int, args=None, add_to='both', slope_index=4):
     '''
     Adds error to every row in data frame, returns avg value of a function 
     for each modified row. Default function is get_dist_from_int.
@@ -323,13 +315,13 @@ def get_error_masses(dataframe, avgs_only=True,
         slope, slope_err = None, None
         offset, off_err = None, None
         if add_to == 'both':
-            slope, slope_err = add_error(row[4], 2, 3, 1)
+            slope, slope_err = add_error(row[slope_index], 2, 3, 1)
             offset, off_err = add_error(row.MassOffset, 2, 3, 1)
         elif add_to == 'slope':
-            slope, slope_err = add_error(row[4], 2, 3, 1)
+            slope, slope_err = add_error(row[slope_index], 2, 3, 1)
             offset, off_err = row.MassOffset, 0.0
         else:
-            slope, slope_err = row[4], 0.0
+            slope, slope_err = row[slope_index], 0.0
             offset, off_err = add_error(row.MassOffset, 2, 3, 1)
         slopes.append(slope)
         offsets.append(offset)
@@ -486,7 +478,7 @@ def dimen_reduc_pca(data, prefix, num=20, comps=2, random_state=42):
 
 
 def augment_spectra(data: pd.DataFrame, column: str, sign_offset=1,
-              sign_slope=1, err=0.1):
+              sign_slope=1, err=0.1, slope_index=4):
     '''
     Method for adding error to offset, slope, or both in order to 
     see how this change affects a spectras change in position relative
@@ -503,14 +495,14 @@ def augment_spectra(data: pd.DataFrame, column: str, sign_offset=1,
     '''
     augmented_rows = []
     for row in data.itertuples():
-        slope = row[4]
+        slope = row[slope_index]
         offset = row.MassOffset
         if column == 'slope':
-            slope = augment_value(row[4], err, sign=sign_slope)
+            slope = augment_value(row[slope_index], err, sign=sign_slope)
         elif column == 'offset':
             offset = augment_value(row.MassOffset, err, sign=sign_offset)
         elif column == 'both':
-            slope = augment_value(row[4], err, sign=sign_slope)
+            slope = augment_value(row[slope_index], err, sign=sign_slope)
             offset = augment_value(row.MassOffset, err, sign=sign_offset)
         else:
             raise ValueError("Invalid column value, must be in 'offset'," + 
