@@ -6,3 +6,18 @@
 .DS_Store
 .vscode
 /venv/
+best_model.hdf5
+datalast_model.hdf5
+df_best_model.csv
+df_metrics.csv
+epochs_loss.png
+history.csv
+last_model.hdf5
+model_init.hdf5
+models/
+notebooks/Slope Error Only Collab.ipynb
+notebooks/SpectraCalibration.ipynb
+notebooks/Untitled0.ipynb
+src/low_error_model.keras
+test_duration.csv
+y_pred.npy
