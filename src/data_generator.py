@@ -45,25 +45,25 @@ class DataGenerator():
         return self._data
     
     def error_df(self, low_proportion, high_proportion, use_ranges=False,
-     ranges=[0.2, 0.4, .6], cat=False):
+     ranges=[0.2, 0.4, .6], cat=False, slope_index=4):
         '''
         Adds error to Mass/Time and MassOffset columns, error ranges beteween
         low_proportion and high_proportion. Returns new dataframe.
         '''
         tens = log(1 / high_proportion, 10)
         modifier = 1 / (1 - 10**tens * low_proportion)
-        return generate_data(self._data, tens=tens, modifier=modifier, use_ranges=use_ranges, ranges=ranges, slope_cat=cat)
+        return generate_data(self._data, tens=tens, modifier=modifier, use_ranges=use_ranges, ranges=ranges, slope_cat=cat, slope_index=slope_index)
 
     def calibrated_df(self, error=False, low_proportion=.005, high_proportion=.01,
-     use_ranges=False, ranges=[0.2, 0.4, .6], cat=False):
+     use_ranges=False, ranges=[0.2, 0.4, .6], cat=False, slope_index=4):
         '''
         Using channels, slope, offset, and start time calibrates each spectras
         data and adds intensity, mass, and channel rows to returned dataframe.
         '''
         df = self._data.copy()
         if error:
-            df = self.error_df(low_proportion, high_proportion, use_ranges, ranges, cat)
-        return generate_calibrated_data(df)
+            df = self.error_df(low_proportion, high_proportion, use_ranges, ranges, cat, slope_index)
+        return generate_calibrated_data(df, slope_index=slope_index)
     
     def get_peak_data(self):
         '''

@@ -594,7 +594,7 @@ def get_suspicious_peaks(masses, ranges, thresh=0.1):
     '''
     Returns all peaks with suspiciousness above threshold value
     '''
-    susses = get_peak_suspiciousness(masses, ranges, False)
+    susses = get_peak_suspiciousness(masses, ranges, True)
     a = np.array(masses)
     b = np.array(susses)
     return a[(b > thresh) & (a < 800)]
