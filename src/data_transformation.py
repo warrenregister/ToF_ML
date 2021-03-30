@@ -124,59 +124,15 @@ def generate_calibrated_data(data, slope_index=4):
     masses = []
     for row in new_data.itertuples():
         mass = []
-        channel = []
-        intensity = []
         spec = row.SpecBinSize
         m_over_t = row[slope_index]
         m_offset = row.MassOffset
         time = row.StartFlightTime
-        for i, tup in enumerate(row.channels):
+        for tup in row.channels:
             mass.append(mass_formula(tup, spec, time, m_over_t, m_offset))
         masses.append(mass)
     new_data['masses'] = masses
     return new_data
-
-
-def get_peaks(channels, height=50):
-    '''
-    Takes peaks for spectrum and returns all peaks and
-    channel locations above given height, default height is 100.
-    '''
-    peak_loc, heights = find_peaks(channels, height=height)
-    return list(zip(peak_loc, heights['peak_heights'].astype(int)))
-
-
-def get_best_peaks(nbest, peaks):
-    '''
-    Return list of the n best or most spread out peaks for each data point.
-    '''
-    results = []
-    for tups in peaks:
-        best_peaks = []
-        def loc(a):
-            return a[0]
-        
-        tups.sort(key=loc)
-        tups = np.array(tups)
-        best_peaks.append(tups[0])
-        best_peaks.append(tups[-1])
-        indices = np.random.choice(np.array(range(len(tups[1:-1]))), nbest - 2)
-        for index in indices:
-            best_peaks.append(tups[index])
-    
-        results.append(best_peaks)
-    return results
-
-
-def get_min_peaks(err_data):
-    '''
-    Determine the smallest number of peaks the database has.
-    '''
-    min_peaks = len(err_data['channel, peak'][0])
-    for tups in err_data['channel, peak']:
-        if min_peaks > len(tups) :
-            min_peaks = len(tups)
-    return min_peaks
 
 
 def get_precise_peaks(df, names):
@@ -205,138 +161,6 @@ def get_better_spectra(dir = '../data/SpectraCsvFiles_WatsonPeakFinder/'):
     
     return pd.DataFrame(list(zip(channels, intensities, names)),
      columns=['precise_channels', 'precise_intensities', 'file_name'])
-
-    
-def get_pred_data(preds, data, names = ['xgb', 'lgbm', 'rfc']):
-    '''
-    Using output of get_wrong_preds, gets dataframe representing how
-    models performed on the examples which were incorrectly classified.
-    '''
-    def loc(tup):
-        return tup[0]
-    pred_data = data.copy()
-    for num in range(len(names)):
-        preds[num].sort(key=loc)
-        pred_data[names[num]] = np.array(preds[num])[:, 1]
-    return pred_data
-
-
-def get_dist_from_int(num):
-    '''
-    Returns distance from nearest whole number.
-    '''
-    return abs(num - round(num))
-
-
-def get_avg(series, func=get_dist_from_int, args=None):
-    '''
-    Returns avg value of a function for every value in a series. Default function is 
-    get_dist_whole_num.
-    '''
-    avg_dists = []
-    for peaks in series:
-        avg_dist = 0
-        for i, peak in enumerate(peaks):
-            dist = 0
-            if args:
-                dist = func(peak, *args)
-            else:
-                dist=func(peak)
-            
-            avg_dist += dist
-        avg_dists.append(avg_dist / len(peaks))
-    return avg_dists
-
-
-def get_peaks_near_nom_masses(masses, nom_masses, num, rev=False):
-    '''
-    For a list of masses and a list of isotope masses near nominal
-    masses, generate list of suspicious peaks far from nominal
-    mass. Returns first 20 suspicious peaks.
-    '''
-    dists = []
-    for mass in masses:
-        index = round(mass)
-        dists.append(mass - nom_masses[index])
-    peaks_near = [x for _,x in sorted(zip(dists,masses), key=lambda pair: pair[0])]
-    dists = sorted(dists)
-    if rev:
-        peaks_near.reverse()
-        dists.reverse()
-    return peaks_near[0:num], dists[0:num]
-
-
-def get_avg_p_beyond(num_peaks_beyond, nom_masses, ab=True):
-    '''
-    Returns the avg number of peaks beyond isotope mass.
-    If ab, uses absolute value.
-    '''
-    avg = 0
-    for peak in num_peaks_beyond:
-        if ab:
-            avg += abs(peak - nom_masses[round(peak)] )/ len(num_peaks_beyond)
-        else:
-            avg += peak - nom_masses[round(peak)] / len(num_peaks_beyond)
-    return avg
-
-
-def get_peaks_below_nom_masses(masses, nom_masses):
-    '''
-    Returns all peaks in masses which are below lowest isotope mass 
-    contained in nom_masses.
-    '''
-    peaks_below = []
-    for mass in masses:
-        index = round(mass)
-        if nom_masses[index] > mass:
-            peaks_below.append(mass)
-    return peaks_below
-
-
-def get_dist_nom_mass(peak, nom_masses):
-    '''
-    Return distance from closest lowest isotope mass.
-    '''
-    return peak - nom_masses[round(peak)]
-
-
-def get_error_masses(dataframe, avgs_only=True,
- func=get_dist_from_int, args=None, add_to='both', slope_index=4):
-    '''
-    Adds error to every row in data frame, returns avg value of a function 
-    for each modified row. Default function is get_dist_from_int.
-    '''
-    mass_lists = []
-    slopes = []
-    offsets = []
-    slope_errs = []
-    off_errs = []
-    for row in dataframe.itertuples():
-        slope, slope_err = None, None
-        offset, off_err = None, None
-        if add_to == 'both':
-            slope, slope_err = add_error(row[slope_index], 2, 3, 1)
-            offset, off_err = add_error(row.MassOffset, 2, 3, 1)
-        elif add_to == 'slope':
-            slope, slope_err = add_error(row[slope_index], 2, 3, 1)
-            offset, off_err = row.MassOffset, 0.0
-        else:
-            slope, slope_err = row[slope_index], 0.0
-            offset, off_err = add_error(row.MassOffset, 2, 3, 1)
-        slopes.append(slope)
-        offsets.append(offset)
-        slope_errs.append(slope_err)
-        off_errs.append(off_err)
-        spec = row.SpecBinSize
-        time = row.StartFlightTime
-        masses = []
-        for tup in row.peaks:
-            masses.append(mass_formula(tup[0], spec, time, slope, offset))
-        mass_lists.append(masses)
-    avgs = get_avg(mass_lists, func=func, args=args)
-    if avgs_only:
-        return avgs
-    return mass_lists, avgs, off_errs, slope_errs
 
 
 def get_isotope_data(path='../data/Elements.txt'):
@@ -368,163 +192,12 @@ def get_isotope_data(path='../data/Elements.txt'):
 
     return isotope_data
 
-def get_isotope_mass_list(df, high, num=500):
-    '''
-    Return list of lowest or highest isotope masses in given dataframe at
-    each nominal mass. If high returns highest masses, if low, the lowest.
-    '''
-    iso_masses = [num for num in range(num)]
-    for masses in df['Isotope Masses']:
-        for mass in masses:
-            boolean = None
-            if not high:
-                boolean = mass < iso_masses[round(mass)]
-            else: 
-                boolean =  mass > iso_masses[round(mass)]
-
-            if isinstance(iso_masses[round(mass)], int) or boolean:
-                iso_masses[round(mass)] = mass
-    return iso_masses
-
-
-def get_peak_data(df, nom_masses_low, nom_masses_high, num=20, threshold=0.1, masses='masses', prefix=''):
-    '''
-    Takes in calibrated ToF DataFrame with peak masses, gets suspicious peaks 
-    above and below isotope masses. Returns new dataframe with a column for 
-    peaks below and above, dists below and above, as well as avgs for both and
-    number of peaks above and below.
-    
-    Arguments-----
-    df: dataframe with mass and peak data
-    num: how many suspicious peaks to store in dataframe, default gets 20 peaks
-    nom_masses_low: list of lowest isotope mass at each nominal mass, ceiling value
-    nom_masses_high: list of highest isotope mass at each nominal mass, floor value
-    threshold: distance from cieling or floor needed to be considered an important peak
-    '''
-    data = df.copy()
-    peak_data_below = data[masses].apply(get_peaks_near_nom_masses, args=(nom_masses_low, -1, False))
-    peak_data_above = data[masses].apply(get_peaks_near_nom_masses, args=(nom_masses_high, -1, True))
-    peaks_below = []
-    peaks_above = []
-    dists_below = []
-    dists_above = []
-    num_above = []
-    num_below = []
-    for i, tup in enumerate(peak_data_above):
-        below = [x for x in peak_data_below[i][1] if x < -1 * threshold]
-        above = [x for x in peak_data_above[i][1] if x >  threshold]
-        num_above.append(len(above))
-        num_below.append(len(below))
-        zeroes_below = [0 for x in range(num - len(below))]
-        zeroes_above = [0 for x in range(num - len(above))]
-        _ = peak_data_below[i][0][0:max(len(below), num)]
-        peaks_below.append((_ + zeroes_below)[0:num])
-        _ = peak_data_above[i][0][0:max(len(above), num)]
-        peaks_above.append((_ + zeroes_above)[0:num])
-        dists_below.append((below + zeroes_below)[0:num])
-        dists_above.append((above + zeroes_above)[0:num])
-
-    data[prefix + 'peaks_below'] = peaks_below
-    data[prefix + 'peaks_above'] = peaks_above
-    data[prefix + 'dists_above'] = dists_above
-    data[prefix + 'dists_below'] = dists_below
-    data[prefix + 'avg_dist_below'] = data[prefix + 'peaks_below'].apply(get_avg_p_beyond, args=(nom_masses_low, True,))
-    data[prefix + 'avg_dist_above'] = data[prefix + 'peaks_above'].apply(get_avg_p_beyond, args=(nom_masses_high, True,))
-    data[prefix + 'num_peaks_below'] = num_above
-    data[prefix + 'num_peaks_above'] = num_below
-    return data
-
-
-def dimen_reduc_tsne(data, prefix, num=20, comps=2, random_state=42):
-    '''
-    Takes dataframe created by get_peak_data and reduces the dimensions of the dists or peaks
-    above or below isotope mass using tSNE.
-    Arguments ------
-    data: dataframe from get_peak_data
-    prefix: either 'dists' or 'peaks'
-    num: min number of peaks to look at, default 20
-    comps: # of components to reduce to, default 2
-    random_state: random state of tsne object
-    '''
-    ab_col = '' + prefix + '_above'
-    bel_col = '' + prefix + '_below'
-    tsne = TSNE(n_components=comps, random_state=random_state)
-    above = np.vstack([np.array(x) for x in data[data[ab_col].apply(len) >=num][ab_col]])
-    above = tsne.fit_transform(above)
-    below = np.vstack([np.array(x) for x in data[data[bel_col].apply(len) >=num][bel_col]])
-    below = tsne.fit_transform(below)
-    return above, below
-
-
-def dimen_reduc_pca(data, prefix, num=20, comps=2, random_state=42):
-    '''
-    Takes dataframe created by get_peak_data and reduces the dimensions of the dists or peaks
-    above or below isotope mass using tSNE.
-    Arguments ------
-    data: dataframe from get_peak_data
-    prefix: either 'dists' or 'peaks'
-    num: min number of peaks to look at, default 20
-    comps: # of components to reduce to, default 2
-    random_state: random state of tsne object
-    '''
-    ab_col = '' + prefix + '_above'
-    bel_col = '' + prefix + '_below'
-    pca = PCA(n_components=comps, random_state=random_state)
-    above = np.vstack([np.array(x) for x in data[data[ab_col].apply(len) >=num][ab_col]])
-    above = pca.fit_transform(above)
-    below = np.vstack([np.array(x) for x in data[data[bel_col].apply(len) >=num][bel_col]])
-    below = pca.fit_transform(below)
-    return above, below
-
-
-def augment_spectra(data: pd.DataFrame, column: str, sign_offset=1,
-              sign_slope=1, err=0.1, slope_index=4):
-    '''
-    Method for adding error to offset, slope, or both in order to 
-    see how this change affects a spectras change in position relative
-    to the population mean. Returns list of new peaks calculated with
-    changed slope and offset values.
-    Arguments -------
-    df: ToF data in dataframe with columns necessary to calculate mass 
-    (i.e channels, offset, slope, flight time, bin size)
-    column: string referring to which column to add error to
-    can be 'offset', 'slope', 'both'
-    sign_offset: sign of error to add to offset, default 1
-    sign_slope: sign of error to add to slope, default 1
-    err: proportion of value to add as error, default 0.1
-    '''
-    augmented_rows = []
-    for row in data.itertuples():
-        slope = row[slope_index]
-        offset = row.MassOffset
-        if column == 'slope':
-            slope = augment_value(row[slope_index], err, sign=sign_slope)
-        elif column == 'offset':
-            offset = augment_value(row.MassOffset, err, sign=sign_offset)
-        elif column == 'both':
-            slope = augment_value(row[slope_index], err, sign=sign_slope)
-            offset = augment_value(row.MassOffset, err, sign=sign_offset)
-        else:
-            raise ValueError("Invalid column value, must be in 'offset'," + 
-                             "'slope','both'")
-        augmented_row = []
-        spec = row.SpecBinSize
-        time = row.StartFlightTime
-        for tup in row.peaks:
-            augmented_row.append(mass_formula(tup[0], spec, time, slope, offset))
-        augmented_rows.append(augmented_row)
-    return augmented_rows
-
-
-def augment_value(value, amount=0.1, sign=-1):
-    '''
-    Takes in value and adds / subtracts amount of itself from
-    itself based on sign.
-    '''
-    return value + sign * amount * value
-
 
 def get_hydrocarbs(max_num_carbs):
+    '''
+    Return list of hydrocarbon masses in amu by calculating all possible
+    hydrocarbons with at most max_num_carbs carbons.
+    '''
     carbon = 12
     hydrogen = 1.00782
     hydrocarbs = []
@@ -545,7 +218,7 @@ def get_hydrocarbs(max_num_carbs):
     return expanded_hydrocarbs
 
 
-def get_ranges(mass_lists, length, max = 235):
+def get_ranges(mass_lists, length, max = 800):
     '''
     Computes no mans land spectras.
     '''
@@ -564,9 +237,18 @@ def get_ranges(mass_lists, length, max = 235):
     return ranges
 
 
-def get_peak_suspiciousness(masses, ranges, show_correct_peaks=False, proportions=False, mass_thresh=2000):
+def get_peak_suspiciousness(masses, ranges, show_correct_peaks=False, proportions=False, mass_thresh=800):
     '''
     Returns list of how suspicious peaks are, how far into no mans land they are.
+
+    Arguments: -------
+    masses: list of peak masses
+    ranges: list of tuples representing 'No Peak Zones'
+    show_correct_peaks: whether, if a peak is not in the 'No Peak Zone',
+                        to show how far into the 'correct zone' it is.
+    proportions: whether to show distance into zone by proportion or by actual
+                 distance.
+    mass_thresh: how far up the amu scale to find suspiciousness, default 800
     '''
     susses = []
     for mass in masses:
@@ -600,25 +282,10 @@ def get_suspicious_peaks(masses, ranges, thresh=0.1):
     return a[(b > thresh) & (a < 800)]
 
 
-def get_xs(data, x=12, thresh=0.1):
+def get_frags(loc='../data/Fragment Table.csv'):
     '''
-    Get all peaks in data near a specific mass x.
+    Read in fragment table and return as an interpretable dataframe.
     '''
-    xs = []
-    for row in data.itertuples():
-        row_x = -1
-        max = -1
-        for i, mass in enumerate(row.masses):
-            dif = abs(mass-x)
-            inten = row.intensities[i]
-            if dif < thresh and (inten > max or max == -1):
-                max = inten
-                row_x = dif
-        xs.append(row_x)
-    return xs
-
-
-def get_frags(loc='../data/FragLibData32_Converted2010 (1)/Fragment Table.csv'):
     df = pd.read_csv(loc)
     a = list(df.columns[0:])
     a[0] = float(a[0])
@@ -627,6 +294,105 @@ def get_frags(loc='../data/FragLibData32_Converted2010 (1)/Fragment Table.csv'):
     df.columns = ['FragmentMass', 'FragmentLabel', 'Isotopes', 'Formula', 'FragmentID']
     b = {'FragmentMass': a[0], 'FragmentLabel': a[1], 'Isotopes':a[2] , 'Formula':a[3],'FragmentID':a[4]}
     df = pd.concat([pd.DataFrame(b, index=[0]), df], sort=False)
+    df.reset_index(drop=True, inplace=True)
     return df
 
 
+def get_frags_dists(masses, frags, thresh=0.003, ab=True):
+    '''
+    Determines which elemental / compound masses correspond
+    to actual spectra masses and returns both the fragments
+    and the distance between each fragment and its related mass in
+    the given spectra.
+
+    Arguments -------
+    masses: list of masses for a spectrum
+    frags: fragment list
+    thresh: how close a fragment must be to a peak for it to be matched,
+            default 3 mamu
+    ab: whether to use absolute value for calculated distances, affects
+        the average distance per spectrum.
+    '''
+    found_masses = []
+    found_frags = []
+    dists = []
+    for mass in masses:
+        not_found = True
+        i = (len(frags)) // 2
+        floor = 0
+        cieling = len(frags) - 1
+
+        def is_findable():
+            if abs(floor - cieling) <= 1:
+                return False
+            return True
+        
+        while not_found:
+            dist = frags[i] - mass
+            if abs(dist) < thresh:
+                not_found = False
+                i = get_closest(i, frags, mass)
+                found_masses.append(mass)
+                found_frags.append(frags[i])
+                if ab:
+                    dists.append(abs(frags[i] - mass))
+                else:
+                    dists.append((frags[i] - mass))
+            elif dist > 0:
+                not_found = is_findable()
+                cieling = i
+                num = abs(floor - i)
+                if num != 1:
+                    i -= abs(floor - i) // 2
+                else:
+                    i -= 1
+            else:
+                not_found = is_findable()
+                floor = i
+                num = abs(cieling - i)
+                if num != 1:
+                    i += abs(cieling - i) // 2
+                else:
+                    i += 1
+    return found_masses, found_frags, dists
+
+
+def get_closest(i, frags, mass):
+    '''
+    Recursively checks that the closest fragment to a peak is selected.
+
+    Arguments ------
+    i: index in fragment list to start checking
+    frags: list of mass fragments
+    mass: mass of peak being matched
+    '''
+    d = abs(frags[i] - mass)
+    if len(frags) > i + 1 and d > abs(frags[i + 1] - mass):
+        i = get_closest(i + 1, frags, mass)
+    elif i - 1 >= 0 and d > abs(frags[i - 1] - mass):
+        i = get_closest(i - 1, frags, mass)
+    return i
+
+
+def get_calibration(data, dist_prop=.5, prop_thresh=0.65):
+    '''
+    Generates calibration column using difference between avg distance from
+    fragment to peak at 2 thresholds and the proportion of peaks matched at a
+    low threshold.
+
+    Arguments -------
+    modifier: how much bigger 2nd avg dist can be before it throws calibration
+              into question, e.g. .5 = 50% bigger
+    prop_thresh: what proportion of matched fragments above which spectra are
+                 considered calibrated
+    '''
+    calibs = []
+    for row in data.itertuples():
+        if row.diff < row.avg_dist_frags_low_thresh * dist_prop:
+            if row.proportions_peaks_identified > prop_thresh:
+                calibs.append(1)
+            else:
+                calibs.append(0)
+        else:
+            calibs.append(0)
+    return calibs

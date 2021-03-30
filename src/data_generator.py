@@ -14,26 +14,11 @@ class DataGenerator():
     '''
     Wrapper around dataframe which can apply changes and return them.
     '''
-    def __init__(self, df, cas_files=False, new_path=''):
+    def __init__(self, df):
         '''
         Initiate dataframe using csv files or by converting cas files.
         '''
-        if type(df) == str :
-            if cas_files:
-                generate_csv(df)
-                df = new_path
-            data = pd.read_csv(df)
-            try:
-                data.drop('Unnamed: 0', axis=1, inplace=True)
-            except:
-                pass
-            data.drop('sequence', inplace=True,axis=1)
-            def str_to_list(string):
-                return [int(s) for s in string[1:-1].split(',')]
-
-            data['channels'] = data['channels'].apply(str_to_list)
-            self._data = data
-        elif isinstance(df, pd.DataFrame):
+        if isinstance(df, pd.DataFrame):
             self._data = df
         else:
             print('Error illegal df argument, must be file path or pandas.core.frame.DataFrame')
@@ -52,7 +37,9 @@ class DataGenerator():
         '''
         tens = log(1 / high_proportion, 10)
         modifier = 1 / (1 - 10**tens * low_proportion)
-        return generate_data(self._data, tens=tens, modifier=modifier, use_ranges=use_ranges, ranges=ranges, slope_cat=cat, slope_index=slope_index)
+        return generate_data(self._data, tens=tens, modifier=modifier,
+                             use_ranges=use_ranges, ranges=ranges,
+                             slope_cat=cat, slope_index=slope_index)
 
     def calibrated_df(self, error=False, low_proportion=.005, high_proportion=.01,
      use_ranges=False, ranges=[0.2, 0.4, .6], cat=False, slope_index=4):
@@ -62,15 +49,9 @@ class DataGenerator():
         '''
         df = self._data.copy()
         if error:
-            df = self.error_df(low_proportion, high_proportion, use_ranges, ranges, cat, slope_index)
+            df = self.error_df(low_proportion, high_proportion, use_ranges,
+                               ranges, cat, slope_index)
         return generate_calibrated_data(df, slope_index=slope_index)
-    
-    def get_peak_data(self):
-        '''
-        Returns 2 dim list of nbest peaks per each spectra.
-        '''
-        peak_list = self._data['channels'].apply(get_peaks)
-        return peak_list
     
     def apply_func(self, column, func):
         '''
