@@ -1,18 +1,18 @@
-from pandas import merge
+from pandas import read_csv
 from data_generator import DataGenerator
-from data_transformation import get_better_spectra, get_precise_peaks
+from ast import literal_eval
 
-def data_setup():
+
+def data_setup(loc='../data/all_calibrated_data.csv'):
     '''
-    Performs perfunctory first time setup for data.
+    Performs perfunctory first time setup for data stored in 
+    all_calibrated_data.csv.
     '''
-    dg = DataGenerator('../data/classification_cas_data.csv')
-    norm_data = dg.df()
-    data = get_better_spectra(dir='../data/SpectraCsvFiles_BkgndSubtractWatsonPeakFinder/')
-    norm_data.sort_values('file_name', inplace=True)
-    data.sort_values('file_name', inplace=True)
-    norm_data = merge(data, norm_data, on='file_name')
-    peaks = get_precise_peaks(norm_data, ['precise_channels', 'precise_intensities'])
-    norm_data['peaks'] = peaks
-    dg.set_df(norm_data)
+    norm_data = read_csv(loc)
+    norm_data['channels']  = norm_data['precise_channels'].apply(literal_eval)
+    norm_data['intensities'] = norm_data['precise_intensities'].apply(literal_eval)
+    norm_data.drop(['precise_channels', 'precise_intensities'], axis=1, inplace=True)
+    norm_data.dropna(inplace=True)
+    norm_data = norm_data[norm_data['intensities'].apply(len)> 0].copy()
+    dg = DataGenerator(norm_data)
     return dg
