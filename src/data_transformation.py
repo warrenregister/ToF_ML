@@ -4,11 +4,6 @@ DataFrame Generation and Data Transformation Functions
 import numpy as np
 from os import listdir
 import pandas as pd
-from scipy.signal import find_peaks
-from sklearn.manifold import TSNE
-from sklearn.decomposition import PCA
-
-
 
 
 def add_error(number, modifier=2, tens=2, threshold=0.5, sub_one=False):
@@ -388,7 +383,7 @@ def get_calibration(data, dist_prop=.5, prop_thresh=0.65):
     '''
     calibs = []
     for row in data.itertuples():
-        if row.diff < row.avg_dist_frags_low_thresh * dist_prop:
+        if row.diff < row.avg_dist_frags_low * dist_prop:
             if row.proportions_peaks_identified > prop_thresh:
                 calibs.append(1)
             else:
@@ -396,3 +391,53 @@ def get_calibration(data, dist_prop=.5, prop_thresh=0.65):
         else:
             calibs.append(0)
     return calibs
+
+
+def get_fragment_stats(data, frag_loc=None, calib_diff_thresh=0.5,
+                       calib_prop_thresh=0.55, threshs=[0.003, 0.007]):
+    '''
+    Use fragment library to generate statistics which describe the calibration
+    of TOF Mass Spectra.
+
+    Arguments -------
+    data: dataframe with spectra peak data
+    frag_loc: optional file loc of fragment database
+    calib_diff_thresh: threshold for diff value in determining calibration, see
+                       get_calibration docstring
+    calib_prop_thresh: threshold for prop value in determining calibration
+    threshs: datastructure with 2 thresholds in amu for matching fragments at
+             low and high thresholds.
+    '''
+    df = data.copy()
+    frags = None
+    if frag_loc:
+        frags = get_frags(frag_loc)
+    else:
+        frags = get_frags()
+    spots = frags['FragmentMass']
+    dists_low_thresh = []
+    dists_high_thresh = []
+    nums = []
+    props = []
+    for row in df.itertuples():
+        peaks = row.masses
+        masses, _, distances = get_frags_dists(peaks, spots, thresh=threshs[0])
+        nums.append(len(masses))
+        props.append(len(masses) / len(peaks))
+        if len(distances) > 0:
+            dists_low_thresh.append(np.mean(distances))
+        else:
+            dists_low_thresh.append(0)
+        _, _, distances = get_frags_dists(peaks, spots, thresh=threshs[1])
+        if len(distances) > 0:
+            dists_high_thresh.append(np.mean(distances))
+        else:
+            dists_high_thresh.append(0)
+    df['avg_dist_frags_low'] = dists_low_thresh
+    df['avg_dist_frags_high'] = dists_high_thresh
+    df['proportions_peaks_identified'] = props
+    df['diff'] = df['avg_dist_frags_high'] - df['avg_dist_frags_low']
+    df['prop_diff_in_low'] = df['diff'] / df['avg_dist_frags_low']
+    df['calibration'] = get_calibration(df, calib_diff_thresh,
+                                        calib_prop_thresh)
+    return df
