@@ -6,6 +6,7 @@
 .DS_Store
 .vscode
 /venv/
+/models/
 best_model.hdf5
 datalast_model.hdf5
 df_best_model.csv

@@ -6,9 +6,7 @@ opening, loading, and doing simple modification to data.
 import pandas  as pd 
 import numpy as np
 from math import log
-from process_cas import generate_csv
 from data_transformation import generate_calibrated_data, generate_data
-from data_transformation import get_peaks
 
 class DataGenerator():
     '''
