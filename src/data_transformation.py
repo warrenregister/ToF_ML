@@ -23,13 +23,37 @@ def add_error(number, modifier=2, tens=2, threshold=0.5, sub_one=False):
     return new_num, error * mult
 
 
+def get_amu_channel(spec_bin_size, start_time,  mass_over_time, mass_offset, amu=100):
+    '''
+    Calculate the channel which corresponds to 100 AMU for a spectra slope
+    and offset values.
+    '''
+    return (((amu**(.5) - mass_offset) / mass_over_time) - start_time) * 1 / (.001 * spec_bin_size)
+
+
+def get_amu_offset(spec_bin_size, start_time,  mass_over_time, channel, amu=100):
+    '''
+    Calculate the offset which moves a channel from its current AMU to the given AMU
+    '''
+    return (amu**(.5) - (channel * (.001 * spec_bin_size) + start_time) * mass_over_time)
+
+
+def get_amu_slope(spec_bin_size, start_time,  mass_offset, channel, amu=100):
+    '''
+    Calculate the slope which moves a channel from its current AMU to the given AMU
+    '''
+    return (amu**(.5) - mass_offset) / (channel * (.001 * spec_bin_size) + start_time)
+
+
 def generate_data(data, tens, modifier, ranges=[0.2, 0.4, .6],
-                  slope_cat=False, sub_one=False, slope_index=4):
+                  multi_class=False, slope_cat=False, sub_one=False,
+                  bad_amt=.0035, good_amt=.0015, slope_mods=False, slope_modifiers=[3, 2]):
     '''
     Takes calibrated ToF-MS data and adds error to the offset and mass.
-    Returns multiclass classification dataset 0: no error,
-    1: offset error, 2: slope error, 3: both. Does not recalibrate with new 
-    slope and offset values
+    Returns classification dataset 0: acceptable error, 1: unacceptable error
+    If multi_class:1: offset error, 2: slope error, 3: both. Does not 
+    recalibrate with new slope and offset values.
+
 
     Arguments -------
     data: dataframe to add error to
@@ -37,53 +61,113 @@ def generate_data(data, tens, modifier, ranges=[0.2, 0.4, .6],
     modifier: modifier to apply to error, eg (rand num) / modifier
     ranges: percentile ranges for different outcomes slope error, offset
     and slope error, offset error
+    multi_class: if True creats mutliclass dataset, else creates binary dataset
     slope_cat: if true both and slope error are in same the category of target.
+    sub_one: sub one argument for add error, whetehr to subtract from 1, flips
+    range when modifier is greater than 1.
+    slope_mods: boolean to indicate that a different set of modifiers should be
+                used to calculate slope
+    slope_modifiers: a 2 element list contianing [tens, modifier] for slope
     '''
     err_data = data.copy()
     target = []
     error_percent_slope = []
     error_percent_offset = []
+    err_amt = []
     new_slope = []
     new_offset = []
     for row in err_data.itertuples():
+        chan_100 = get_amu_channel(row.SpecBinSize, row.StartFlightTime,
+                                      row.MassOverTime, row.MassOffset)
+        init_100 = mass_formula(np.array(chan_100), row.SpecBinSize,
+                                row.StartFlightTime, row.MassOverTime,
+                                row.MassOffset)
+        
         num = np.random.rand(1)
         if num < ranges[0]: #slope only
-            target.append(2)
-            slope, sl_err = add_error(row[slope_index], tens=tens, modifier=modifier, sub_one=sub_one)
+            ten = tens
+            mod = modifier
+            if slope_mods:
+                ten = slope_modifiers[0]
+                mod = slope_modifiers[1]
+
+            slope, sl_err = add_error(row.MassOverTime, tens=ten, modifier=mod, sub_one=sub_one)
             error_percent_slope.append(sl_err)
             new_slope.append(slope)
             new_offset.append(row.MassOffset)
             error_percent_offset.append(0)
-        elif num >= ranges[0] and num < ranges[1]: # both
-            if slope_cat:
-                target.append(2)
+            new_100 = mass_formula(np.array(chan_100), row.SpecBinSize,
+                                row.StartFlightTime, slope,
+                                row.MassOffset)
+            diff_100 = init_100 - new_100
+            err_amt.append(diff_100)
+            diff_100 = abs(diff_100)
+            if abs(diff_100) > good_amt:
+                if multi_class:
+                    target.append(2)
+                else:
+                    if diff_100 > bad_amt:
+                        target.append(2)
+                    else: target.append(1)
             else:
-                target.append(3)
+                target.append(0)
+        elif num >= ranges[0] and num < ranges[1]: # both
+            ten = tens
+            mod = modifier
+            if slope_mods:
+                ten = slope_modifiers[0]
             offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier, sub_one=sub_one)
             error_percent_offset.append(off_err)
             new_offset.append(offset)
-            slope, sl_err = add_error(row[slope_index], tens=tens, modifier=modifier, sub_one=sub_one)
+            slope, sl_err = add_error(row.MassOverTime, tens=ten, modifier=mod, sub_one=sub_one)
             error_percent_slope.append(sl_err)
             new_slope.append(slope)
+            new_100 = mass_formula(np.array(chan_100), row.SpecBinSize,
+                                row.StartFlightTime, slope, offset)
+            diff_100 = init_100 - new_100
+            err_amt.append(diff_100)
+            if abs(diff_100) > good_amt:
+                if multi_class:
+                    if slope_cat:
+                        target.append(2)
+                    else:
+                        target.append(3)
+                else:
+                    if diff_100 > bad_amt:
+                        target.append(2)
+                    else: target.append(1)
+            else:
+                target.append(0)
         elif num >= ranges[1] and num < ranges[2]: # offset only
-            target.append(1)
             error_percent_slope.append(0)
             offset, off_err = add_error(row.MassOffset, tens=tens, modifier=modifier, sub_one=sub_one)
             error_percent_offset.append(off_err)
             new_offset.append(offset)
-            new_slope.append(row[slope_index])
+            new_slope.append(row.MassOverTime)
+            new_100 = mass_formula(np.array(chan_100), row.SpecBinSize,
+                                row.StartFlightTime, row.MassOverTime,
+                                offset)
+            diff_100 = init_100 - new_100
+            err_amt.append(diff_100)
+            if abs(diff_100) > good_amt:
+                if diff_100 > bad_amt:
+                        target.append(2)
+                else: target.append(1)
+            else:
+                target.append(0)
         else: # none
             target.append(0)
             error_percent_slope.append(0)
             error_percent_offset.append(0)
-            new_slope.append(row[slope_index])
-            new_offset.append(row.MassOffset)
-    
+            err_amt.append(0)
+            new_slope.append(row.MassOverTime)
+            new_offset.append(row.MassOffset)    
         
     err_data['target'] = target
     err_data['err_prop_slope'] = error_percent_slope
     err_data['err_prop_offset'] = error_percent_offset
-    err_data['Mass/Time'] = new_slope
+    err_data['err_at_100amu'] = err_amt
+    err_data['MassOverTime'] = new_slope
     err_data['MassOffset'] = new_offset
     return err_data
 
@@ -105,7 +189,7 @@ def mass_formula(channels: np.array, spec_bin_size, start_time,  mass_over_time,
     return ((channels * .001 * spec_bin_size + start_time) * mass_over_time + mass_offset)**2
 
 
-def generate_calibrated_data(data, slope_index=4, numba=False):
+def generate_calibrated_data(data, numba=False):
     '''
     Applies mass_formula to every row in dataset to allow
     calibrated graphs to be generated.
@@ -114,7 +198,7 @@ def generate_calibrated_data(data, slope_index=4, numba=False):
     masses = []
     for row in new_data.itertuples():
         spec = row.SpecBinSize
-        m_over_t = row[slope_index]
+        m_over_t = row.MassOverTime
         m_offset = row.MassOffset
         time = row.StartFlightTime
         if not numba:
@@ -140,7 +224,7 @@ def get_precise_peaks(df, names):
 
 def get_better_spectra(dir = '../data/SpectraCsvFiles_WatsonPeakFinder/'):
     '''
-    Read in better peak info and trandform into lists of channels, intensities, names.
+    Read in better peak info and transform into lists of channels, intensities, names.
     '''
     channels = []
     intensities = []
@@ -253,7 +337,7 @@ def get_hydrocarbs_numba(max_num_carbs):
 
 
 
-def get_ranges(mass_lists, length, max = 800):
+def get_ranges(mass_lists, length):
     '''
     Computes no mans land spectras.
     '''
@@ -261,7 +345,7 @@ def get_ranges(mass_lists, length, max = 800):
     for masses in mass_lists:
         for mass in masses:
             i = int(mass)
-            if mass < 235.043933:
+            if mass < 236:
                 if round(mass) == i + 1 and mass < ranges[i][1]:
                     ranges[i][1] = mass
                 elif round(mass) == i and mass > ranges[i][0]:
@@ -313,8 +397,9 @@ def get_suspicious_peaks(masses, ranges, thresh=0.1):
     '''
     susses = get_peak_suspiciousness(masses, ranges, True)
     a = np.array(masses)
+    a = a[a < 800]
     b = np.array(susses)
-    return a[(b > thresh) & (a < 800)]
+    return a[(b > thresh)]
 
 
 def get_frags(loc='../data/Fragment Table.csv'):
@@ -333,7 +418,7 @@ def get_frags(loc='../data/Fragment Table.csv'):
     return df
 
 
-def get_frags_dists(masses, frags, thresh=0.003, ab=True):
+def get_frags_dists(masses, frags, threshes=[0.003, 0.007], ab=True):
     '''
     Determines which elemental / compound masses correspond
     to actual spectra masses and returns both the fragments
@@ -348,9 +433,7 @@ def get_frags_dists(masses, frags, thresh=0.003, ab=True):
     ab: whether to use absolute value for calculated distances, affects
         the average distance per spectrum.
     '''
-    found_masses = []
-    found_frags = []
-    dists = []
+    stats = [[[] for x in range(3)] for x in range(len(threshes))]
     for mass in masses:
         not_found = True
         i = (len(frags)) // 2
@@ -364,15 +447,18 @@ def get_frags_dists(masses, frags, thresh=0.003, ab=True):
         
         while not_found:
             dist = frags[i] - mass
-            if abs(dist) < thresh:
+            if abs(dist) < max(threshes):
                 not_found = False
                 i = get_closest(i, frags, mass)
-                found_masses.append(mass)
-                found_frags.append(frags[i])
-                if ab:
-                    dists.append(abs(frags[i] - mass))
-                else:
-                    dists.append((frags[i] - mass))
+                dist = frags[i] - mass
+                for j, thresh in enumerate(threshes):
+                    if abs(dist) < threshes[j]:
+                        stats[j][0].append(mass)
+                        stats[j][1].append(frags[i])
+                        if ab:
+                            stats[j][2].append(abs(frags[i] - mass))
+                        else:
+                            stats[j][2].append((frags[i] - mass))
             elif dist > 0:
                 not_found = is_findable()
                 cieling = i
@@ -389,7 +475,7 @@ def get_frags_dists(masses, frags, thresh=0.003, ab=True):
                     i += abs(cieling - i) // 2
                 else:
                     i += 1
-    return found_masses, found_frags, dists
+    return tuple([a for x in stats for a in x])
 
 
 def get_closest(i, frags, mass):
@@ -465,19 +551,22 @@ def get_fragment_stats(data, frag_loc=None, calib_diff_thresh=0.5,
     limited_props = []
     for row in df.itertuples():
         peaks = np.array(row.masses)
-        masses, _, distances = get_frags_dists(peaks, spots, thresh=threshs[0])
+        masses, frags1, dist1, masses2, frags2, dist2 = get_frags_dists(peaks,
+                                                                    spots,
+                                                                    [.003,.007])
+        prop = len(masses) / len(peaks)
+        lprop = len(masses) / len(peaks[peaks<236])
+        low_dist = 0
+        high_dist = 0
+        if len(dist1) > 0:
+            low_dist = np.mean(dist1)
+        if len(dist2) > 0:
+            high_dist = np.mean(dist2)
+        dists_high_thresh.append(high_dist)
+        dists_low_thresh.append(low_dist)
         nums.append(len(masses))
-        props.append(len(masses) / len(peaks))
-        limited_props.append(len(masses) / len(peaks[peaks < 236]))
-        if len(distances) > 0:
-            dists_low_thresh.append(np.mean(distances))
-        else:
-            dists_low_thresh.append(0)
-        _, _, distances = get_frags_dists(peaks, spots, thresh=threshs[1])
-        if len(distances) > 0:
-            dists_high_thresh.append(np.mean(distances))
-        else:
-            dists_high_thresh.append(0)
+        props.append(prop)
+        limited_props.append(lprop)
     df['avg_dist_frags_low'] = dists_low_thresh
     df['avg_dist_frags_high'] = dists_high_thresh
     df['adjusted_' + prop_name] = limited_props
@@ -488,28 +577,48 @@ def get_fragment_stats(data, frag_loc=None, calib_diff_thresh=0.5,
                                         calib_prop_thresh, prop_col='adjusted_'+prop_name)
     return df
 
-def recalibrate(row, spots, slope_amt=0, offset_amt=0, start_ind=2):
+def recalibrate(row, spots, slope_val, offset_val, augment=True,
+                num_peaks=False):
     '''
     Function which quickly asseses the calibration of a spectrum.
+    If augment is True slope_val and offset_val are treated as proportions
+    of slope/offset to augment original values with. Otherwise the values
+    are treated a the new values for slope and offset.
+
+    Arguments -------
+    row: row corresponding to spectra
+    spots: pd.Series of fragments
+    slope_val: either a proportion of slope to augment slope with or a new value
+    for slope.
+    offset_val: either a proportion of offset to augment offset with or a new
+    value for offset.
+    augment: whether to treat slope_val/offset_val as a proportion or value
+    num_peaks: if true also returns the number of peaks of matched per spectrum
     '''
-    slope = row[start_ind] + slope_amt * row[start_ind]
-    offset = row[start_ind+1] + offset_amt * row[start_ind+1]
+    if augment:
+        slope = row.MassOverTime + slope_val * row.MassOverTime
+        offset = row.MassOffset + offset_val * row.MassOffset
+    else:
+        slope = slope_val
+        offset = offset_val
+    
     peaks = []
-    peaks = mass_formula(row.channels, row.SpecBinSize, row.StartFlightTime, slope,
+    peaks = mass_formula(np.array(row.channels), row.SpecBinSize, row.StartFlightTime, slope,
                    offset)
-    masses, _, distances = get_frags_dists(peaks, spots, thresh=.003)
-    prop = len(masses) / len(peaks)
-    #print('proportion matched: ' + str(prop))
+    masses, frags1, dist1, masses2, frags2, dist2 = get_frags_dists(peaks,
+                                                                    spots,
+                                                                    [.003,.007])
+    prop = len(masses) / (len(peaks[peaks<236]) + 1)
     low_dist = 0
-    if len(distances) > 0:
-        low_dist = np.mean(distances)
-    #print('distance low threshold: ' + str(low_dist))
-    a, b, distances = get_frags_dists(peaks, spots, thresh=.007)
     high_dist = 0
-    if len(distances) > 0:
-        high_dist = np.mean(distances)
-    #print('distance high threshold: ' + str(high_dist))
-    return prop, low_dist, high_dist
+    if len(dist1) > 0:
+        low_dist = np.mean(dist1)
+    if len(dist2) > 0:
+        high_dist = np.mean(dist2)
+    if num_peaks:
+        return prop, low_dist, high_dist, len(masses)
+    else:
+        return prop, low_dist, high_dist
 
 
 def get_best_offset(spectrum, slope_range, offset_range, prev=0,
@@ -528,7 +637,10 @@ def get_best_offset(spectrum, slope_range, offset_range, prev=0,
     offset_range: data structure containing min, max offset agumentation
                        to try. This method shrinks the range iteratively until
                        the best offset is achieved.
-    spots: a list of mass fragments
+    prev: previous best proportion, used for recursion
+    offsets: number of evenly spaced offsets to generate in range
+    slopes: number of evenly spaced slopes to generate in range
+    frags: a list of mass fragments
     '''
     if first:
         print('optimizing ' + spectrum.file_name)
@@ -619,3 +731,74 @@ def get_best_offset(spectrum, slope_range, offset_range, prev=0,
                 best_slope = bs
     return (proportions, low_distances, high_distances, ys, best_prop,
             best_offset, best_slope)
+
+
+def get_severity(original_slope, original_offset, new_slope, new_offset,
+                 bin_size, start_time, channel=200, scaler=.02):
+    '''
+    Asses severity of error on a spectra. Returns linear value with numbers below
+    around .2 being well calibrated and those above .2 being poorly calibrated.
+    '''
+    two_hundred_channel = get_amu_channel(bin_size, start_time, original_slope,
+                                          original_offset, channel)
+    orig_200 = mass_formula(np.array(two_hundred_channel), bin_size, start_time,
+                            original_slope, original_offset)
+    new_200 = mass_formula(np.array(two_hundred_channel), bin_size, start_time,
+                           new_slope, new_offset)
+    dif = abs(orig_200 - new_200)
+    return (dif / scaler)
+
+
+def augment_spectrum(slope, offset, bin_size, start_time, modifier=1):
+    '''
+    Add a random amount of error to a spectrum so that it falls onto a
+    normal distribution of spectra with error.
+    '''
+    two_hundred_channel = get_amu_channel(bin_size, start_time, slope, offset,
+                                          200)
+    
+    vals = [slope, offset]
+    #new_vals = [0, 0]
+    for num in range(2):
+        sign, amount = tuple(np.random.rand(2))
+        amount = amount / modifier
+        orig = mass_formula(np.array(two_hundred_channel), bin_size, start_time,
+                            vals[0], vals[1])
+        mult = -1 if sign < .5 else 1
+        if num == 0 :
+            new_offset = get_amu_offset(bin_size, start_time, vals[0],
+                                        two_hundred_channel,
+                                        orig + mult * amount)
+            vals[1] = new_offset
+        else:
+            new_slope = get_amu_slope(bin_size, start_time, vals[1],
+                                      two_hundred_channel, orig + mult * amount)
+            vals[0] = new_slope
+    return tuple(vals)
+
+
+def augment_data(data, severity_scaler=0.02, spectrum_modifier=95):
+    '''
+    Returns new dataframe with augmented slope and offset values with error.
+    Also adds a severity column showing how much error each spectrum has.
+    '''
+    df = data.copy()
+    new_slopes = []
+    new_offsets = []
+    severities = []
+    for row in df.itertuples():
+        slope = row.MassOverTime
+        offset = row.MassOffset
+        bin_size = row.SpecBinSize
+        start_time = row.StartFlightTime
+        new_slope, new_offset = augment_spectrum(slope, offset, bin_size,
+                                                 start_time, spectrum_modifier)
+        new_slopes.append(new_slope)
+        new_offsets.append(new_offset)
+        severities.append(get_severity(slope, offset, new_slope, new_offset,
+                                       bin_size, start_time,
+                                       scaler=severity_scaler))
+    df['MassOverTime'] = new_slopes
+    df['MassOffset'] = new_offsets
+    df['Severity'] = severities
+    return generate_calibrated_data(df)
