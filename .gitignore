@@ -2,6 +2,7 @@
 /.ipynb_checkpoints
 /data
 /notebooks/.ipynb_checkpoints
+/models/
 /src/__pycache__
 .DS_Store
 .vscode
