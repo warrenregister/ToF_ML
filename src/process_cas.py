@@ -1,5 +1,5 @@
 '''
-Scrape data from cas database into one csv file.
+Methods for scraping TOF spectra data out of raw cas files.
 '''
 import os
 import pandas as pd 
