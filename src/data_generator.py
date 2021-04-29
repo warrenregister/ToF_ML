@@ -28,6 +28,7 @@ class DataGenerator():
                             self._data[key] = series
             except FileNotFoundError as e:
                 print("Error: Invalid file path passed.")
+
         else:
             print("Error: illegal df argument, must be file path or" +
                   "pandas.core.frame.DataFrame")

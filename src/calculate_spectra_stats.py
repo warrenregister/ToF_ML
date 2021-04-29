@@ -235,8 +235,8 @@ def get_fragment_stats(data, frag_loc=None, difference_thresh=0.5,
         masses, _, dist1, _, frags2, dist2 = calc_fragment_matches(peaks,
                                                                    frags,
                                                                    threshs)
-        prop = len(masses) / len(peaks)
-        lprop = len(masses) / len(peaks[peaks < 236])
+        prop = len(masses) / (len(peaks) + .001)
+        lprop = len(masses) / (len(peaks[peaks < 236]) + .001)
         low_dist = 0
         high_dist = 0
         if len(dist1) > 0:

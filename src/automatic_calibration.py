@@ -10,8 +10,8 @@ from calculate_spectra_stats import calc_new_spectrum_stats, get_fragment_stats
 
 
 def main():
-    data_loc = ""
-    fragment_loc = ""
+    data_loc = "../test_data/unmodified_full_dataset.csv"
+    fragment_loc = "../test_data/Fragment Table.csv"
 
     dg = DataGenerator(data_loc)
     df = dg.calibrated_df()
@@ -35,6 +35,7 @@ def main():
         slopes.append(s)
         files.append(row.file_name)
         indices.append(row.index)
+        i += 1
 
     DataFrame({'offsets': offsets, 'slopes': slopes, 'names': files,
                'indices': indices}).to_csv(
