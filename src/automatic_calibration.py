@@ -4,14 +4,16 @@ statistics.
 """
 from numpy import linspace, where
 from pandas import DataFrame
-from data_generation import get_frags
+from data_generation import get_frags, get_isotope_data
 from data_generator import DataGenerator
 from calculate_spectra_stats import calc_new_spectrum_stats, get_fragment_stats
+from calculate_spectra_stats import get_ranges
 
 
 def main():
     data_loc = "../test_data/unmodified_full_dataset.csv"
     fragment_loc = "../test_data/Fragment Table.csv"
+    iso_loc = "../test_data/Elements.txt"
 
     dg = DataGenerator(data_loc)
     df = dg.calibrated_df()
@@ -22,6 +24,8 @@ def main():
     df.drop('index', axis=1, inplace=True)
     df['index'] = a
 
+    npzs = get_ranges(get_isotope_data(iso_loc)['Isotope Masses'], 2000)
+
     offsets = []
     slopes = []
     files = []
@@ -30,7 +34,8 @@ def main():
     for row in df.loc[0:].itertuples():
         print('Spectrum Number: ' + str(i))
         p, o, s = get_best_offset(row, [.00001, .0000001], [.001, .000001],
-                                  fragment_loc, offsets=20, slopes=10)
+                                  fragment_loc, npzs, offsets=20, slopes=10)
+        print('Final Proportion: ' + str(p))
         offsets.append(o)
         slopes.append(s)
         files.append(row.file_name)
@@ -42,7 +47,7 @@ def main():
         '../data/updated_calibration_new_1900_first_478.csv', index=False)
 
 
-def get_best_offset(spectrum, slope_range, offset_range, loc, offsets=30,
+def get_best_offset(spectrum, slope_range, offset_range, loc, npzs, offsets=30,
                     slopes=20, prev=0, mnpzps=None, mnpzad=None) -> tuple:
     """
     Find best amount of slope/offset to add/subtract to achieve the optimal
@@ -62,6 +67,7 @@ def get_best_offset(spectrum, slope_range, offset_range, loc, offsets=30,
     to try. This method shrinks the range iteratively until
     the best offset is achieved.
     loc: file location of fragment database
+    npzs: no peak zone list, sometimes called ranges
     offsets: number of evenly spaced offsets to generate in range
     slopes: number of evenly spaced slopes to generate in range
     prev: float, for recursion: previous best proportion
@@ -74,7 +80,7 @@ def get_best_offset(spectrum, slope_range, offset_range, loc, offsets=30,
     if mnpzps is None and mnpzad is None:
         print('optimizing ' + spectrum.file_name)
         prop, _, _, mnpzps, mnpzad = calc_new_spectrum_stats(spectrum, frags, 0,
-                                                             0, num_peaks=False)
+                                                             0, npzs)
         best_prop = prop
         print('initial proportion: ' + str(prop))
 
@@ -97,7 +103,8 @@ def get_best_offset(spectrum, slope_range, offset_range, loc, offsets=30,
                     improved = False
                     offset_val = mult * offset
                     values = calc_new_spectrum_stats(spectrum, frags,
-                                                     slope_val, offset_val)
+                                                     slope_val, offset_val,
+                                                     npzs)
                     prop, low, high, num_npz, ad_npz = values
                     if (prop > best_prop and num_npz <= mnpzps and
                        ad_npz <= mnpzps):
@@ -129,6 +136,7 @@ def get_best_offset(spectrum, slope_range, offset_range, loc, offsets=30,
                                      prev=best_prop,
                                      offsets=20,
                                      loc=loc,
+                                     npzs=npzs,
                                      slopes=5,
                                      mnpzps=mnpzps,
                                      mnpzad=mnpzad)

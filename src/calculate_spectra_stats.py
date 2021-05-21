@@ -4,7 +4,7 @@ Mass Spectra.
 """
 import numpy as np
 import pandas as pd
-from data_generation import get_frags, mass_formula, get_isotope_data
+from data_generation import get_frags, mass_formula
 
 
 def get_ranges(mass_lists: pd.Series, length: int) -> list:
@@ -30,6 +30,51 @@ def get_ranges(mass_lists: pd.Series, length: int) -> list:
                 ranges[i][0] = mass
                 ranges[i][1] = i + .9871
     return ranges
+
+
+def get_tallest_per_nominal_mass(masses, intensities) -> tuple:
+    """
+    Given a list of masses and a list of their corresponding intensities
+    finds the tallest peak at each whole number or nominal mass.
+
+    Returns 2 lists containing the tallest masses at each nominal mass and
+    their corresponding intensities / occurrence counts.
+
+    Arguments -------
+    masses: List of mass values for a TOF Spectrum
+    intensities: list of occurrence counts / intensities for a TOF Spectrum
+    """
+
+    if len(masses) != len(intensities) :
+        print("Invalid Argument Error, mass and intensity lists are of" +
+              "unequal length.")
+        return masses, intensities
+
+    masses = [x for x, y in sorted(zip(masses, intensities))]
+    intensities = [y for x, y in sorted(zip(masses, intensities))]
+
+    new_masses = []
+    new_intensities = []
+    curr_nom_mass = 0
+    max_height_curr_nom_mass = 0
+    max_index = None
+    for i, mass in enumerate(masses):
+        if round(mass) == curr_nom_mass:
+            if intensities[i] > max_height_curr_nom_mass:
+                max_height_curr_nom_mass = intensities[i]
+                max_index = i
+        else:
+            if max_height_curr_nom_mass != 0:
+                new_masses.append(masses[max_index])
+                new_intensities.append(intensities[max_index])
+
+            curr_nom_mass = round(mass)
+            max_height_curr_nom_mass = intensities[i]
+            max_index = i
+    new_masses.append(masses[max_index])
+    new_intensities.append(intensities[max_index])
+
+    return new_masses, new_intensities
 
 
 def get_distance_npz(masses, ranges, show_correct_peaks=False,
@@ -70,21 +115,49 @@ def get_distance_npz(masses, ranges, show_correct_peaks=False,
     return dists_or_props
 
 
-def get_suspicious_peaks(masses, ranges, thresh=0.1) -> np.array:
+def get_suspicious_peaks(masses, ranges, thresh=0.1) -> tuple:
     """
     Returns list of all peaks with distance / proportion into the No Peak Zone
-    above the given threshold, thresh.
+    above the given threshold, thresh as well as the mean distance into the
+    No Peak Zone.
 
     Arguments -------
     masses: list of peak mass values.
     ranges: list of tuples representing no peak zones.
     thresh: threshold beyond which peaks in the No Peak Zone are suspicious.
     """
-    susses = get_distance_npz(masses, ranges, True)
+    susses = get_distance_npz(masses, ranges, False)
     a = np.array(masses)
     a = a[a < 800]
     b = np.array(susses)
-    return a[(b > thresh)]
+    return a[(b > thresh)], np.mean(susses)
+
+
+def calc_npz_score(masses, intensities, ranges, thresh=0.1):
+    """
+    Modified version of get suspicious peaks which calculates an NPZ score
+    which weights peaks based on their height.
+
+    Arguments -------
+    masses: list of peak mass values.
+    intensities: list of peak intensity values
+    ranges: list of tuples representing no peak zones.
+    thresh: threshold beyond which peaks in the No Peak Zone are suspicious.
+    """
+    susses = get_distance_npz(masses, ranges, False)
+    masses = np.array(masses)
+    masses = masses[masses < 800]
+    intens = np.array(intensities)
+    intens = intens[masses < 800]
+    b = np.array(susses)
+
+    peaks = masses[(b > thresh)]
+    intens =intens[(b > thresh)]
+    sum = 0
+    for i, peak in enumerate(peaks):
+        sum += intens[i]
+
+    return sum / np.sum(intensities)
 
 
 def get_calibration(differences, avg_dist_low, proportions, dist_prop=.5,
@@ -137,12 +210,15 @@ def calc_fragment_matches(masses, frags, threshes=(0.003, 0.007),
     masses: list of masses for a spectrum
     frags: fragment list
     thresh: how close a fragment must be to a peak for it to be matched,
-            default .003 dalton/amu
+    default .003 dalton/amu
     ab: whether to use absolute value for calculated distances, affects
         the average distance per spectrum.
     """
     stats = [[[] for x in range(3)] for y in range(len(threshes))]
-    for mass in masses:
+    max_frag = max(frags) + max(threshes)
+    findable_masses = np.array(masses)
+    findable_masses = findable_masses[findable_masses < max_frag]
+    for mass in findable_masses:
         not_found = True
         i = (len(frags)) // 2
         floor = 0
@@ -167,7 +243,7 @@ def calc_fragment_matches(masses, frags, threshes=(0.003, 0.007),
                             stats[j][2].append(abs(frags[i] - mass))
                         else:
                             stats[j][2].append((frags[i] - mass))
-            elif dist > 0:
+            elif dist > 0:  # positive dist
                 not_found = is_findable()
                 ceiling = i
                 num = abs(floor - i)
@@ -175,7 +251,7 @@ def calc_fragment_matches(masses, frags, threshes=(0.003, 0.007),
                     i -= abs(floor - i) // 2
                 else:
                     i -= 1
-            else:
+            else:  # negative dist
                 not_found = is_findable()
                 floor = i
                 num = abs(ceiling - i)
@@ -261,9 +337,9 @@ def get_fragment_stats(data, frag_loc=None, difference_thresh=0.5,
     return df
 
 
-def calc_new_spectrum_stats(row, spots, slope_val, offset_val, augment=True,
-                            num_peaks=False, threshes=(.003, .007), loc=None,
-                            ranges=None) -> tuple:
+def calc_new_spectrum_stats(row, spots, slope_val, offset_val, ranges,
+                            threshes=(.003, .007), add=False,
+                            num_peaks=False) -> tuple:
     """
     Calculates % of peaks matched to fragments, avg distance from peak to
     fragment at a low and high threshold, how many peaks are in the no peak
@@ -286,19 +362,19 @@ def calc_new_spectrum_stats(row, spots, slope_val, offset_val, augment=True,
     loc: (Optional) string, path to Isotope Data file
     ranges: (Optional) string, list of tuples representing No Peak Zones.
     """
-    if augment:
-        slope = row.MassOverTime + slope_val * row.MassOverTime
-        offset = row.MassOffset + offset_val * row.MassOffset
-    else:
-        slope = slope_val
-        offset = offset_val
+    slope = row.MassOverTime + slope_val * row.MassOverTime
+    offset = row.MassOffset + offset_val * row.MassOffset
+    if add:
+        slope = row.MassOverTime + slope_val
+        offset = row.MassOffset + offset_val
 
     peaks = mass_formula(np.array(row.channels), row.SpecBinSize,
                          row.StartFlightTime, slope, offset)
     masses, _, dist1, masses2, frags2, dist2 = calc_fragment_matches(peaks,
                                                                      spots,
                                                                      threshes)
-    num_npz, ad_npz = calc_npz_peaks(peaks, loc, ranges)
+    num_npz, ad_npz = get_suspicious_peaks(peaks, ranges)
+    num_npz = len(num_npz)
 
     prop = len(masses) / (len(peaks[peaks < 236]) + 1)
     low_dist = 0
@@ -307,38 +383,7 @@ def calc_new_spectrum_stats(row, spots, slope_val, offset_val, augment=True,
         low_dist = np.mean(dist1)
     if len(dist2) > 0:
         high_dist = np.mean(dist2)
+
     if num_peaks:
-        return prop, low_dist, high_dist, num_npz, ad_npz, len(masses)
-    else:
-        return prop, low_dist, high_dist, num_npz, ad_npz
-
-
-def calc_npz_peaks(masses: pd.Series, loc:str = None,
-                   ranges: list = None) -> tuple:
-    """
-    Calculates the number of peaks that are in the No Peak Zones defined by
-    ranges as well as their average distance into those zones.
-
-    Arguments -------
-    masses: data structure containing the mass of all peaks in a spectrum
-    loc: (Optional) string, path to isotope mass database
-    ranges: (Optional) list of No Peak Zones if not passed, calls
-    get_ranges(masses, 2000) to generate ranges.
-    """
-    if ranges is None:
-        try:
-            if loc is None:
-                ranges = get_ranges(get_isotope_data()['Isotope Masses'], 2000)
-            else:
-                ranges = get_ranges(get_isotope_data(loc)['Isotope Masses'],
-                                    2000)
-        except FileNotFoundError as e:
-            if loc is not None:
-                print('Error: Isotope Data not found at loc:' + loc)
-            else:
-                print('Error: please specify where Isotope Data file is.')
-            raise e
-
-    peaks = get_suspicious_peaks(masses, ranges)
-    avg_dist = get_distance_npz(masses, ranges)
-    return len(peaks), np.mean(avg_dist)
+        return prop, low_dist, high_dist, len(masses), num_npz, ad_npz
+    return prop, low_dist, high_dist, num_npz, ad_npz
