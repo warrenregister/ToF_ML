@@ -4,20 +4,22 @@ Mass Spectra.
 """
 import numpy as np
 import pandas as pd
-from data_generation import get_frags, mass_formula
+from data_generation import get_frags, mass_formula, get_isotope_data
 
 
-def get_ranges(mass_lists: pd.Series, length: int) -> list:
+def get_ranges(mass_lists: pd.Series, mass_limit: int) -> list:
     """
-    Creates list of No Peak Zones from 1 Dalton to length Daltons.
+    Creates list of No Peak Zones from 1 Dalton to mass_limit Daltons.
+
+    Returns list of NPZs between each nominal mass up until the mass_limit.
 
     Arguments -------
     mass_lists: a pd.Series containing lists or numpy arrays of the
     mass values for a set of TOF Spectra.
-    length: int representing how far up the dalton/amu scale to generate no
+    mass_limit: int representing how far up the dalton/amu scale to generate no
     peak zones.
     """
-    ranges = [[x, x + 1] for x in range(length)]
+    ranges = [[x, x + 1] for x in range(mass_limit)]
     for masses in mass_lists:
         for mass in masses:
             i = int(mass)
@@ -82,6 +84,9 @@ def get_distance_npz(masses, ranges, show_correct_peaks=False,
     """
     Returns list of how how far into the No Peak Zone the given masses are.
 
+    Returns list of distances into NPZ if proportions is False otherwise returns
+    list of proportionally how far towards the center of the NPZ each peak is.
+
     Arguments: -------
     masses: list of peak masses
     ranges: list of tuples representing 'No Peak Zones'
@@ -115,28 +120,34 @@ def get_distance_npz(masses, ranges, show_correct_peaks=False,
     return dists_or_props
 
 
-def get_suspicious_peaks(masses, ranges, thresh=0.1) -> tuple:
+def get_suspicious_peaks(masses, ranges, thresh=0.1, mass_limit=800) -> tuple:
     """
     Returns list of all peaks with distance / proportion into the No Peak Zone
-    above the given threshold, thresh as well as the mean distance into the
+    above the given threshold, as well as the mean distance into the
     No Peak Zone.
+
+    Returns all suspicious peaks as well as the average suspicion level of all
+    passed in peaks.
 
     Arguments -------
     masses: list of peak mass values.
     ranges: list of tuples representing no peak zones.
-    thresh: threshold beyond which peaks in the No Peak Zone are suspicious.
+    thresh: threshold beyond which peaks in NPZ are suspicious, default .1
+    mass_limit: mass limit beyond which npz is not checked, default 800
     """
     susses = get_distance_npz(masses, ranges, False)
     a = np.array(masses)
-    a = a[a < 800]
+    a = a[a < mass_limit]
     b = np.array(susses)
     return a[(b > thresh)], np.mean(susses)
 
 
-def calc_npz_score(masses, intensities, ranges, thresh=0.1):
+def calc_npz_score(masses, intensities, ranges, thresh=0.1) -> float:
     """
     Modified version of get suspicious peaks which calculates an NPZ score
     which weights peaks based on their height.
+
+    Returns NPZ score.
 
     Arguments -------
     masses: list of peak mass values.
@@ -160,51 +171,36 @@ def calc_npz_score(masses, intensities, ranges, thresh=0.1):
     return sum / np.sum(intensities)
 
 
-def get_calibration(differences, avg_dist_low, proportions, dist_prop=.5,
-                    prop_thresh=0.65) -> pd.Series:
+def calc_npz_stats(masses, intensities, ranges, mass_limit=800) -> tuple:
     """
-    Generates 'calibration' column using difference between avg distance from
-    fragment to peak at 2 thresholds and the proportion of peaks matched at a
-    low threshold, typically .003 daltons/amu.
+    Calculates and returns number of tallest peaks in the NPZ, proportion of
+    tallest peaks in the NPZ, and the avg distance into the NPZ.
 
-    differences, avg_dist_low, proportions must all be the same length.
+    Returns number of npz peaks, proportion of npz peaks, and avg dist into NPZ.
 
     Arguments -------
-    differences: pd.Series showing difference between avg distance from fragment
-    at a low and high threshold divided by the low threshold value.
-    avg_dist_low: pd.Series of avg distance from fragment at a low threshold,
-    typically .003 daltons/amu.
-    proportions: pd.Series of proportions of peaks matched to a fragment at a
-    low threshold of .003 daltons/amu.
-    modifier: how much bigger 2nd avg dist can be before it throws calibration
-    into question, e.g. .5 = 50% bigger
-    prop_thresh: what proportion of matched fragments above which spectra are
-    considered calibrated
+    masses: list of mass values for a spectrum
+    intensities: list of intensities for a spectrum's masses
+    ranges: list of NPZ ranges
+    mass_limit: threshold beyond which ragnes are not calculated / included
     """
-    if (len(differences) != len(proportions) and
-            len(proportions) != len(avg_dist_low)):
-        raise Exception("differences, proportions, and avg_dist_low must" +
-                        "all be the same length.")
-
-    calibrations = []
-    for index in range(len(proportions)):
-        if differences[index] < avg_dist_low[index] * dist_prop:
-            if proportions[index] > prop_thresh:
-                calibrations.append(1)
-            else:
-                calibrations.append(0)
-        else:
-            calibrations.append(0)
-    return pd.Series(calibrations)
+    peaks, heights = get_tallest_per_nominal_mass(masses, intensities)
+    sus_peaks, ad = get_suspicious_peaks(peaks, ranges, mass_limit=mass_limit)
+    return len(sus_peaks), len(sus_peaks) / (len(peaks) + .001), ad
 
 
 def calc_fragment_matches(masses, frags, threshes=(0.003, 0.007),
-                          ab=True) -> tuple:
+                          ab=True, index=False) -> tuple:
     """
     Determines which elemental / compound masses correspond
     to actual spectra masses and returns both the fragments
     and the distance between each fragment and its related mass in
     the given spectra.
+
+    Returns a set of values for each threshold in threshes. These values
+    are a list of masses matched, a list of the corresponding fragments, and a
+    list of their separations. If index is True also returns a list of indexes
+    for each returned mass in the passed in masses list.
 
     Arguments -------
     masses: list of masses for a spectrum
@@ -215,6 +211,8 @@ def calc_fragment_matches(masses, frags, threshes=(0.003, 0.007),
         the average distance per spectrum.
     """
     stats = [[[] for x in range(3)] for y in range(len(threshes))]
+    if index:
+        stats = [[[] for x in range(4)] for y in range(len(threshes))]
     max_frag = max(frags) + max(threshes)
     findable_masses = np.array(masses)
     findable_masses = findable_masses[findable_masses < max_frag]
@@ -243,6 +241,8 @@ def calc_fragment_matches(masses, frags, threshes=(0.003, 0.007),
                             stats[j][2].append(abs(frags[i] - mass))
                         else:
                             stats[j][2].append((frags[i] - mass))
+                        if index:
+                            stats[j][3].append(masses.index(mass))
             elif dist > 0:  # positive dist
                 not_found = is_findable()
                 ceiling = i
@@ -266,6 +266,8 @@ def get_closest(i, frags, mass) -> int:
     """
     Recursively checks that the closest fragment to a peak is selected.
 
+    Returns index of closest fragment.
+
     Arguments ------
     i: index in fragment list to start checking
     frags: list of mass fragments
@@ -279,72 +281,100 @@ def get_closest(i, frags, mass) -> int:
     return i
 
 
-def get_fragment_stats(data, frag_loc=None, difference_thresh=0.5,
-                       proportion_thresh=0.55, threshs=(0.003, 0.007),
-                       prop_name='proportion_identified') -> pd.DataFrame:
+def calc_spectrum_stats(data, frag_loc, iso_loc, threshes=(0.003, 0.007),
+                        inplace=False):
     """
-    Use fragment library to generate statistics which describe the calibration
-    of TOF Mass Spectra.
+    Use fragment library and the No Peak Zone to calculate descriptive
+    statistics for a dataset.
+
+    Returns a new dataframe with added columns for the stats if inplace is
+    False, otherwise returns nothing because original dataframe is changed
+    instead.
 
     Arguments -------
     data: dataframe with spectra peak data
     frag_loc: optional file loc of fragment database
-    difference_thresh: threshold for diff value in determining calibration, see
-    get_calibration docstring
-    proportion_thresh: threshold for prop value in determining calibration
-    threshs: data structure with 2 thresholds in amu for matching fragments at
+    threshes: data structure with 2 thresholds in amu for matching fragments at
     low and high thresholds.
     """
-    df = data.copy()
-    if frag_loc:
-        frags = get_frags(frag_loc)
+    if not inplace:
+        df = data.copy()
     else:
-        frags = get_frags()
-    frags = frags['FragmentMass']
+        df = data
+    try:
+        frags = get_frags(frag_loc)['FragmentMass']
+    except FileNotFoundError:
+        raise Exception('Invalid frag_loc, file not found.')
+    try:
+        ranges = get_ranges(get_isotope_data(iso_loc)['Isotope Masses'], 800)
+    except FileNotFoundError:
+        raise Exception("Invalid iso_loc, file not found.")
+
     dists_low_thresh = []
+    stds_low_thresh = []
     dists_high_thresh = []
-    nums = []
-    props = []
-    limited_props = []
+    stds_high_thresh = []
+    nums_matches = []
+    props_matched = []
+    nums_npz = []
+    props_npz = []
+    avg_dists_npz = []
     for row in df.itertuples():
         peaks = np.array(row.masses)
-        masses, _, dist1, _, frags2, dist2 = calc_fragment_matches(peaks,
-                                                                   frags,
-                                                                   threshs)
-        prop = len(masses) / (len(peaks) + .001)
-        lprop = len(masses) / (len(peaks[peaks < 236]) + .001)
+        masses, _, dist1, _, _, dist2 = calc_fragment_matches(peaks, frags,
+                                                              threshes)
+        limited_prop = len(masses) / (len(peaks[peaks < 236]) + .001)
+
         low_dist = 0
+        std_low_dist = 0
         high_dist = 0
+        std_high_dist = 0
         if len(dist1) > 0:
             low_dist = np.mean(dist1)
+            std_low_dist = np.std(dist1)
         if len(dist2) > 0:
             high_dist = np.mean(dist2)
+            std_high_dist = np.std(dist2)
+
         dists_high_thresh.append(high_dist)
+        stds_high_thresh.append(std_high_dist)
         dists_low_thresh.append(low_dist)
-        nums.append(len(masses))
-        props.append(prop)
-        limited_props.append(lprop)
-    df['avg_dist_frags_low'] = dists_low_thresh
-    df['avg_dist_frags_high'] = dists_high_thresh
-    df['adjusted_' + prop_name] = limited_props
-    df[prop_name] = props
-    df['diff'] = df['avg_dist_frags_high'] - df['avg_dist_frags_low']
-    df['prop_diff_in_low'] = df['diff'] / df['avg_dist_frags_low']
-    df['calibration'] = get_calibration(df['diff'], df['avg_dist_frags_low'],
-                                        df['adjusted_' + prop_name],
-                                        difference_thresh,
-                                        proportion_thresh)
-    return df
+        stds_low_thresh.append(std_low_dist)
+        nums_matches.append(len(masses))
+        props_matched.append(limited_prop)
+
+        num, prop, ad = calc_npz_stats(row.masses, row.intensities, ranges, 800)
+        nums_npz.append(num)
+        props_npz.append(prop)
+        avg_dists_npz.append(ad)
+    df['Avg Fragment Separation Low Thresh'] = dists_low_thresh
+    df['STD Fragment Sep Low Thresh'] = stds_low_thresh
+    df['Avg Fragment Separation High Thresh'] = dists_high_thresh
+    df['STD Fragment Sep High Thresh'] = stds_high_thresh
+    df['Adjusted Proportion Matched'] = props_matched
+    df['Number Matched'] = nums_matches
+    df['Number Tallest NPZ'] = nums_npz
+    df['Proportion Tallest NPZ'] = props_npz
+    df['Avg Dist Tallest NPZ'] = avg_dists_npz
+
+    if not inplace:
+        return df
+    return None
 
 
 def calc_new_spectrum_stats(row, spots, slope_val, offset_val, ranges,
-                            threshes=(.003, .007), add=False,
-                            num_peaks=False) -> tuple:
+                            threshes=(.003, .007), add=False) -> tuple:
     """
-    Calculates % of peaks matched to fragments, avg distance from peak to
-    fragment at a low and high threshold, how many peaks are in the no peak
-    zone, their avg distance into the npz, and optionally how many peaks were
-    matched to fragments.
+    Changes the calibration of a spectrum and then calculates descriptive
+    statistics for the new version of the spectrum. Can change spectrum
+    calibration in a number of ways using different types of slope_val and
+    offset_val. Can be treated as proportions of slope/offset to add to original
+    values, or a number to add to slope/offset.
+
+
+    Returns proportion matched, number of peaks matched, low threshold fragment
+    separation, high threshold fragment separation, proportion of tallest peaks
+    in the NPZ, number of tallest peaks in the NPZ, avg dist into the NPZ.
 
     Arguments -------
     row: row corresponding to spectra
@@ -353,14 +383,12 @@ def calc_new_spectrum_stats(row, spots, slope_val, offset_val, ranges,
     for slope.
     offset_val: either a proportion of offset to augment offset with or a new
     value for offset.
-    augment: (Optional) whether to treat slope_val/offset_val as a proportion
-    or value
-    num_peaks: (Optional) if true also returns the number of peaks of matched
-    per spectrum
+    ranges: list of tuples representing No Peak Zones.
     threshes: (Optional) data structure containing threshold values to check
     for fragment matches under
-    loc: (Optional) string, path to Isotope Data file
-    ranges: (Optional) string, list of tuples representing No Peak Zones.
+    add: (Optional) True if adding slope/offset val to original False if using
+    slope/offset val as a proportion of original to change original by.
+    mass_limit: (Optional) mass limit used to create ranges list, default 800
     """
     slope = row.MassOverTime + slope_val * row.MassOverTime
     offset = row.MassOffset + offset_val * row.MassOffset
@@ -373,8 +401,7 @@ def calc_new_spectrum_stats(row, spots, slope_val, offset_val, ranges,
     masses, _, dist1, masses2, frags2, dist2 = calc_fragment_matches(peaks,
                                                                      spots,
                                                                      threshes)
-    num_npz, ad_npz = get_suspicious_peaks(peaks, ranges)
-    num_npz = len(num_npz)
+    num_npz, prop_npz, ad_npz = calc_npz_stats(peaks, row.intensities, ranges)
 
     prop = len(masses) / (len(peaks[peaks < 236]) + 1)
     low_dist = 0
@@ -384,6 +411,57 @@ def calc_new_spectrum_stats(row, spots, slope_val, offset_val, ranges,
     if len(dist2) > 0:
         high_dist = np.mean(dist2)
 
-    if num_peaks:
-        return prop, low_dist, high_dist, len(masses), num_npz, ad_npz
-    return prop, low_dist, high_dist, num_npz, ad_npz
+    return prop, len(masses), low_dist, high_dist, prop_npz, num_npz, ad_npz
+
+
+def recalibrate(peak1, flight_time1, loc, flight_time2) -> tuple:
+    """
+    Recalibrate a spectra so that 1 peak stays where it is and another is
+    shifted to a desired position.
+
+    Returns new slope and offset values.
+
+    Arguments ------
+    peak1: peak mass value, this one stays the same
+    flight_time1: peak1's corresponding flight time
+    loc: mass value to shift peak2 towards
+    flight_time2: peak2's corresponding flight time
+    """
+    peak1 = np.sqrt(peak1)
+    loc = np.sqrt(loc)
+    slope = (peak1 - loc) / (flight_time1 - flight_time2)
+    offset = slope * (0 - flight_time1) + peak1
+    return slope, offset
+
+
+def simulate_calibration_mistake(masses, channels, slope, offset,
+                                 bin_size, start_time, changes=False) -> tuple:
+    """
+    In order to create more realistic errors, this function searches spectra for
+    good matches nearby other peaks, chooses sets that are relatively far apart
+    and recalibrates so that one peak is switched with a nearby one.
+
+    Returns either new slope and offset value if changes is False, or the
+    difference between the new and old values if changes is True.
+
+    Arguments -------
+    masses: list of peak masses
+    channels: list of channels associated with masses
+    slope: original slope value
+    offset: original offset value
+    bin_size: spectrum bin size
+    start_time: start flight time
+    changes: (Optional) if True returns changes to slope offset instead of new
+    values, default False
+    """
+    arr = np.array(masses)
+    peak1 = arr[arr>11][0]
+    time1 = channels[masses.index(peak1)] * .001 * bin_size + start_time
+    peak2 = arr[arr > peak1 + 20][0]
+    mult = -1 if np.random.randint(0, 10, 1) <= 4 else 1
+    e = np.random.uniform(.01, .0015, 1)[0] * mult
+    time2 = (np.sqrt(peak2 + e) - offset) / slope
+    new_slope, new_offset = recalibrate(peak1, time1, peak2, time2)
+    if changes:
+        return new_slope - slope, new_offset - offset
+    return new_slope, new_offset

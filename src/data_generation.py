@@ -7,20 +7,56 @@ import numpy as np
 import pandas as pd
 
 
-def add_error(number, modifier=2, tens=2, threshold=0.5,
-              sub_one=False) -> tuple:
+def read_csvs(dir):
     """
-    Add or subtract a random amount of error based on the modifier and tens
-    variables.
-    Error calculated : (random num between 0 and 1 / modifier) / ten**tens
+    Read in all spectra csvs in the given directory to a dataframe containing
+    values necessary for calibrating the spectrum.
     """
-    randoms = np.random.rand(2)
-    error = (randoms[0] / modifier) / 10 ** tens
-    if sub_one:
-        error = (1 - randoms[0] / modifier) / 10 ** tens
-    mult = 1 if randoms[1] > threshold else -1
-    new_num = number + mult * number * error
-    return new_num, error * mult
+    info = ['Technique', 'StartFlightTime', 'Mass/Time', 'MassOffset',
+            'SpecBinSize']
+    data = [[] for name in info]
+    channels = []
+    intensities = []
+    names = []
+    for csv in listdir(dir):
+        chans = []
+        intens = []
+        if csv[-3:] == 'csv':
+            file = pd.read_csv(dir + csv, names=list('abcdefghijk'))
+            names.append(csv)
+            i = 0
+            line = ''
+            while 'EOFH' not in line:
+                line = file.loc[i]['a']
+                for j, name in enumerate(info):
+                    if name in line:
+                        datum = line.split(':')[-1]
+                        try:
+                            datum = float(datum)
+                        except ValueError:
+                            try:
+                                datum = 0 if '-' in datum else 1
+                                datum = int(datum)
+                            except Exception as e:
+                                print(e)
+                        data[j].append(datum)
+                i += 1
+            for line in file.loc[i:].itertuples():
+                try:
+                    chans.append(float(line[1]))
+                    intens.append(float(line[2]))
+                except ValueError as e:
+                    print(e)
+                    print(line[1])
+                    print(line[2])
+            channels.append(chans)
+            intensities.append(intens)
+    return pd.DataFrame(
+        list(zip(names, data[1], data[2], data[3], data[4], data[0],
+                 channels, intensities)),
+        columns=['file_name', 'StartFlightTime',
+                 'MassOverTime', 'MassOffset', 'SpecBinSize',
+                 'Technique', 'channels', 'intensities'])
 
 
 def get_amu_channel(spec_bin_size, start_time, mass_over_time, mass_offset,
@@ -53,141 +89,6 @@ def get_amu_slope(spec_bin_size, start_time, mass_offset, channel,
                                         start_time)
 
 
-def generate_data(data, tens, modifier, ranges=(0.2, 0.4, .6),
-                  multi_class=False, slope_cat=False, sub_one=False,
-                  bad_amt=.0035, good_amt=.0015, slope_mods=False,
-                  slope_modifiers=(3, 2)) -> pd.DataFrame:
-    """
-    Takes calibrated ToF-MS data and adds error to the offset and mass.
-    Returns classification dataset 0: acceptable error, 1: unacceptable error
-    If multi_class:1: offset error, 2: slope error, 3: both. Does not
-    recalibrate with new slope and offset values.
-
-
-    Arguments -------
-    data: dataframe to add error to
-    tens: power of tens place for error
-    modifier: modifier to apply to error, eg (rand num) / modifier
-    ranges: percentile ranges for different outcomes slope error, offset
-    and slope error, offset error
-    multi_class: if True creates mutliclass dataset, else creates binary dataset
-    slope_cat: if true both and slope error are in same the category of target.
-    sub_one: sub one argument for add error, whether to subtract from 1, flips
-    range when modifier is greater than 1.
-    slope_mods: boolean to indicate that a different set of modifiers should be
-                used to calculate slope
-    slope_modifiers: a 2 element list containing [tens, modifier] for slope
-    """
-    err_data = data.copy()
-    target = []
-    error_percent_slope = []
-    error_percent_offset = []
-    err_amt = []
-    new_slope = []
-    new_offset = []
-    for row in err_data.itertuples():
-        chan_100 = get_amu_channel(row.SpecBinSize, row.StartFlightTime,
-                                   row.MassOverTime, row.MassOffset)
-        init_100 = mass_formula(np.array(chan_100), row.SpecBinSize,
-                                row.StartFlightTime, row.MassOverTime,
-                                row.MassOffset)
-
-        num = np.random.rand(1)
-        if num < ranges[0]:  # slope only
-            ten = tens
-            mod = modifier
-            if slope_mods:
-                ten = slope_modifiers[0]
-                mod = slope_modifiers[1]
-
-            slope, sl_err = add_error(row.MassOverTime, tens=ten, modifier=mod,
-                                      sub_one=sub_one)
-            error_percent_slope.append(sl_err)
-            new_slope.append(slope)
-            new_offset.append(row.MassOffset)
-            error_percent_offset.append(0)
-            new_100 = mass_formula(np.array(chan_100), row.SpecBinSize,
-                                   row.StartFlightTime, slope,
-                                   row.MassOffset)
-            diff_100 = init_100 - new_100
-            err_amt.append(diff_100)
-            diff_100 = abs(diff_100)
-            if abs(diff_100) > good_amt:
-                if multi_class:
-                    target.append(2)
-                else:
-                    if diff_100 > bad_amt:
-                        target.append(2)
-                    else:
-                        target.append(1)
-            else:
-                target.append(0)
-        elif ranges[0] <= num < ranges[1]:  # both
-            ten = tens
-            mod = modifier
-            if slope_mods:
-                ten = slope_modifiers[0]
-            offset, off_err = add_error(row.MassOffset, tens=tens,
-                                        modifier=modifier, sub_one=sub_one)
-            error_percent_offset.append(off_err)
-            new_offset.append(offset)
-            slope, sl_err = add_error(row.MassOverTime, tens=ten, modifier=mod,
-                                      sub_one=sub_one)
-            error_percent_slope.append(sl_err)
-            new_slope.append(slope)
-            new_100 = mass_formula(np.array(chan_100), row.SpecBinSize,
-                                   row.StartFlightTime, slope, offset)
-            diff_100 = init_100 - new_100
-            err_amt.append(diff_100)
-            if abs(diff_100) > good_amt:
-                if multi_class:
-                    if slope_cat:
-                        target.append(2)
-                    else:
-                        target.append(3)
-                else:
-                    if diff_100 > bad_amt:
-                        target.append(2)
-                    else:
-                        target.append(1)
-            else:
-                target.append(0)
-        elif ranges[1] <= num < ranges[2]:  # offset only
-            error_percent_slope.append(0)
-            offset, off_err = add_error(row.MassOffset, tens=tens,
-                                        modifier=modifier, sub_one=sub_one)
-            error_percent_offset.append(off_err)
-            new_offset.append(offset)
-            new_slope.append(row.MassOverTime)
-            new_100 = mass_formula(np.array(chan_100), row.SpecBinSize,
-                                   row.StartFlightTime, row.MassOverTime,
-                                   offset)
-            diff_100 = init_100 - new_100
-            err_amt.append(diff_100)
-            if abs(diff_100) > good_amt:
-                if diff_100 > bad_amt:
-                    target.append(2)
-                else:
-                    target.append(1)
-            else:
-                target.append(0)
-        else:  # none
-            target.append(0)
-            error_percent_slope.append(0)
-            error_percent_offset.append(0)
-            err_amt.append(0)
-            new_slope.append(row.MassOverTime)
-            new_offset.append(row.MassOffset)
-
-    err_data['target'] = target
-    err_data['err_prop_slope'] = error_percent_slope
-    err_data['err_prop_offset'] = error_percent_offset
-    err_data['err_at_100amu'] = err_amt
-    err_data['MassOverTime'] = new_slope
-    err_data['MassOffset'] = new_offset
-    return err_data
-
-
 def mass_formula(channels: np.array, spec_bin_size, start_time, mass_over_time,
                  mass_offset) -> np.array:
     """
@@ -213,39 +114,6 @@ def generate_calibrated_data(data) -> pd.DataFrame:
                                    m_over_t, m_offset))
     new_data['masses'] = masses
     return new_data
-
-
-def get_precise_peaks(df, names):
-    """
-    Return list of peaks channels and intensities from dataframe of precise
-    peaks.
-    """
-    all_peaks = []
-    for row in df.iterrows():
-        chans = row[1][names[0]][row[1][names[1]] > 0]
-        intens = row[1][names[1]][row[1][names[1]] > 0]
-        all_peaks.append(list(zip(chans, intens)))
-    return all_peaks
-
-
-def get_better_spectra(loc='../data/SpectraCsvFiles_WatsonPeakFinder/')\
-        -> pd.DataFrame:
-    """
-    Read in better peak info and transform into lists of channels, intensities,
-    names.
-    """
-    channels = []
-    intensities = []
-    names = []
-    for csv in listdir(loc):
-        data = pd.read_csv(loc + csv, names=['channels', 'intensities'])
-        channels.append(data['channels'])
-        intensities.append(data['intensities'])
-        names.append(csv[0:-3] + 'cas')
-
-    return pd.DataFrame(list(zip(channels, intensities, names)),
-                        columns=['precise_channels', 'precise_intensities',
-                                 'file_name'])
 
 
 def get_isotope_data(path='../data/Elements.txt') -> pd.DataFrame:
@@ -326,3 +194,4 @@ def get_frags(loc='../data/Fragment Table.csv') -> pd.DataFrame:
     df = pd.concat([pd.DataFrame(b, index=[0]), df], sort=False)
     df.reset_index(drop=True, inplace=True)
     return df
+
