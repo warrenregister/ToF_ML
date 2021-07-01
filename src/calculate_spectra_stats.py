@@ -7,7 +7,7 @@ import pandas as pd
 from data_generation import get_frags, mass_formula, get_isotope_data
 
 
-def get_ranges(mass_lists: pd.Series, mass_limit: int) -> list:
+def get_ranges(mass_lists: pd.Series, mass_limit: int, negative=False) -> list:
     """
     Creates list of No Peak Zones from 1 Dalton to mass_limit Daltons.
 
@@ -18,20 +18,41 @@ def get_ranges(mass_lists: pd.Series, mass_limit: int) -> list:
     mass values for a set of TOF Spectra.
     mass_limit: int representing how far up the dalton/amu scale to generate no
     peak zones.
+    corrected: if True uses corrected NPZ which allows Greg's odd spectra
+    to look a lot better.
     """
     ranges = [[x, x + 1] for x in range(mass_limit)]
+    mass_range = {170: .8, 270: .7, 340: .65, 400: .6, 716: .56}
     for masses in mass_lists:
         for mass in masses:
             i = int(mass)
-            if mass < 236:
+            if mass < 170:
                 if round(mass) == i + 1 and mass < ranges[i][1]:
                     ranges[i][1] = mass
                 elif round(mass) == i and mass > ranges[i][0]:
                     ranges[i][0] = mass
             else:
                 ranges[i][0] = mass
-                ranges[i][1] = i + .9871
+                val = 0
+                if negative:
+                    for key in mass_range.keys():
+                        if mass <= key:
+                            val = mass_range[key]
+                            break
+                    ranges[i][1] = i + val
+                else:
+                    ranges[i][1] = i + .9871
     return ranges
+
+
+def get_ppm(mass, fragment):
+    """
+    Calculate PPM separation between a mass and a fragment
+    """
+    ppm = 1e6 * abs(mass - fragment)
+    if mass != 0:
+        ppm /= mass
+    return ppm
 
 
 def get_tallest_per_nominal_mass(masses, intensities) -> tuple:
@@ -80,7 +101,7 @@ def get_tallest_per_nominal_mass(masses, intensities) -> tuple:
 
 
 def get_distance_npz(masses, ranges, show_correct_peaks=False,
-                     proportions=False, mass_thresh=800) -> list:
+                     proportions=False, mass_thresh=717) -> list:
     """
     Returns list of how how far into the No Peak Zone the given masses are.
 
@@ -120,7 +141,7 @@ def get_distance_npz(masses, ranges, show_correct_peaks=False,
     return dists_or_props
 
 
-def get_suspicious_peaks(masses, ranges, thresh=0.1, mass_limit=800) -> tuple:
+def get_suspicious_peaks(masses, ranges, thresh=0.1, mass_limit=717) -> tuple:
     """
     Returns list of all peaks with distance / proportion into the No Peak Zone
     above the given threshold, as well as the mean distance into the
@@ -157,9 +178,9 @@ def calc_npz_score(masses, intensities, ranges, thresh=0.1) -> float:
     """
     susses = get_distance_npz(masses, ranges, False)
     masses = np.array(masses)
-    masses = masses[masses < 800]
+    masses = masses[masses < 717]
     intens = np.array(intensities)
-    intens = intens[masses < 800]
+    intens = intens[masses < 717]
     b = np.array(susses)
 
     peaks = masses[(b > thresh)]
@@ -171,7 +192,7 @@ def calc_npz_score(masses, intensities, ranges, thresh=0.1) -> float:
     return sum / np.sum(intensities)
 
 
-def calc_npz_stats(masses, intensities, ranges, mass_limit=800) -> tuple:
+def calc_npz_stats(masses, intensities, ranges, mass_limit=717) -> tuple:
     """
     Calculates and returns number of tallest peaks in the NPZ, proportion of
     tallest peaks in the NPZ, and the avg distance into the NPZ.
@@ -306,7 +327,7 @@ def calc_spectrum_stats(data, frag_loc, iso_loc, threshes=(0.003, 0.007),
     except FileNotFoundError:
         raise Exception('Invalid frag_loc, file not found.')
     try:
-        ranges = get_ranges(get_isotope_data(iso_loc)['Isotope Masses'], 800)
+        ranges = get_ranges(get_isotope_data(iso_loc)['Isotope Masses'], 717)
     except FileNotFoundError:
         raise Exception("Invalid iso_loc, file not found.")
 
@@ -343,7 +364,7 @@ def calc_spectrum_stats(data, frag_loc, iso_loc, threshes=(0.003, 0.007),
         nums_matches.append(len(masses))
         props_matched.append(limited_prop)
 
-        num, prop, ad = calc_npz_stats(row.masses, row.intensities, ranges, 800)
+        num, prop, ad = calc_npz_stats(row.masses, row.intensities, ranges, 717)
         nums_npz.append(num)
         props_npz.append(prop)
         avg_dists_npz.append(ad)
