@@ -13,7 +13,7 @@ class ToFCalibrationDetector:
     calibration of new spectra.
     """
 
-    def __init__(self, k, model=LGBMClassifier, dir=None):
+    def __init__(self, k=10, model=LGBMClassifier, dire=None):
         """
         Initiate fields of object. Models created using kfold cross validation,
         k specifies both how many folds and how many modles to use. If dir is
@@ -29,7 +29,7 @@ class ToFCalibrationDetector:
         self._alg = model
 
         if dir:
-            self._models = self._load_models(dir)
+            self._models = self._load_models(dire)
             self._trained = True
         else:
             self._models = []
