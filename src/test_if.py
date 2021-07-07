@@ -11,9 +11,8 @@ def main():
     test_data = generate_calibrated_data(test_data)
     test_data['masses'] = test_data['masses'].apply(list)
 
-    row = test_data.loc[0]
-    elements = test.find_atomic_patterns(row['masses'], row['intensities'],
-                                         thresh=.03)
+    row = test_data.loc[1]
+    elements = test.find_atomic_patterns(row['masses'], row['intensities'])
     print(elements)
 
 

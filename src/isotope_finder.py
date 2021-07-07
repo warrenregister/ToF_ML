@@ -6,7 +6,7 @@ import itertools
 
 import numpy as np
 from data_generation import get_isotope_data
-from itertools import product
+from interpeak_distance_ratio import InterPeakDistanceRatio
 
 """
 Plan: 
@@ -56,7 +56,8 @@ class IsotopeFinder:
                     self._isotopes[name] = isotopes
                     self._abundances[name] = abundance
 
-    def mz_search(self, masses: np.array, thresh=.007, num_required=2) -> dict:
+    def mz_search(self, masses: np.array, intensities, thresh=.007,
+                  num_required=2) -> dict:
         """
         Search a set of masses for candidate peaks for element identification.
 
@@ -64,7 +65,8 @@ class IsotopeFinder:
         each isotope in the order the isotopes are in self._isotopes.
 
         Arguments -------
-        masses: rounded masses to make candidate finding broader
+        masses: array of spectrum masses
+        intensities: list of spectrum mass intensities
         thresh: (Optional) int representing how close a peak must be to an
         isotope to be considered a match, default .007 Da/amu
         num_required: (Optional) number of most abundant isotopes required to
@@ -74,6 +76,7 @@ class IsotopeFinder:
         candidates = {}
         for key in self._isotopes.keys():
             element_isotopes = self._isotopes[key]
+            abundances = self._abundances[key]
             important_isotopes_present = True
             possibles = [[] for x in range(len(element_isotopes))]
             distances = [[] for x in range(len(element_isotopes))]
@@ -88,6 +91,11 @@ class IsotopeFinder:
                     for possible in possibles[i]:
                         indices.append(np.where(masses == possible)[0][0])
                     possibles[i] = indices
+                    # assume it is possible for interference / missing peak
+                    # even if one is found
+                    if abundances[i] < .02:
+                        possibles[i].append(-1)
+                        distances[i].append(-1)
                 elif i <= num_required:
                     important_isotopes_present = False
                 else:
@@ -116,19 +124,29 @@ class IsotopeFinder:
         thresh: (Optional) threshold value for mz_search
         num_required: (Optional) number of required isotope peaks for mz_search
         distance_metric: (Optional) function, metric used to score distance,
-        must take in 2-7 distances as a list and return a single score. Defaults
-        to calc_weighted_mean_std_sum.
+        must take in 2-7 distances as a list and return a single score to be
+        minimized. Defaults to calc_weighted_mean_std_sum.
         abundance_metric: (Optional) function, metric used to score abundance
         ratio, must take in 2 lists of 2-7 abundances and return a single score
-        by comparing them. Defaults to calc_vector_distance
+        by comparing them, this score will be minimized. Defaults to
+        calc_vector_distance.
         """
-        candidates = self.mz_search(np.array(masses))
+        candidates = self.mz_search(np.array(masses), intensities,
+                                    thresh=thresh, num_required=num_required)
+        avg_ht = np.mean(intensities)
         elements = {}
         for key in candidates.keys():
             combs = list(itertools.product(*candidates[key][0]))
             comb_dists = list(itertools.product(*candidates[key][1]))
-            scores = [[], []]
+            dist_scores = []
+            ab_scores = []
+            best_index = None
             for i in range(len(combs)):
+                if not self.check_abundance_order(combs[i], intensities):
+                    dist_scores.append(100000)
+                    ab_scores.append(100000)
+                    continue
+
                 values = self.get_reduced_values(combs[i],comb_dists[i],
                                                  self._abundances[key])
                 indices, distances, abundances = values
@@ -136,23 +154,80 @@ class IsotopeFinder:
                 if distance_metric:
                     score1 = distance_metric(distances)
                 else:
-                    score1 = self.calc_weighted_mean_std_sum(distances, 1, 2)
+                    score1 = self.calc_weighted_mean_std_sum(distances)
+                dist_scores.append(score1)
 
                 peak_abundances = self.get_abundance_ratios(indices,
                                                             intensities)
-                if abundance_metric:
-                    score2 = abundance_metric(peak_abundances, abundances)
+                if len(indices) > 1:  # abundance isn't relevant w/ 1 peak
+                    if abundance_metric:
+                        score2 = abundance_metric(peak_abundances, abundances)
+                    else:
+                        score2 = self.calc_vector_distance(peak_abundances,
+                                                           abundances)
+                    ab_scores.append(score2)
                 else:
-                    score2 = self.calc_vector_distance(peak_abundances,
-                                                       abundances)
-                scores[0].append(score1)
-                scores[1].append(score2)
+                    ab_scores.append(-10)
 
-            best_index = np.where(scores[0] == min(scores[0]))[0][0]
-            elements[key] = [scores[0][best_index], scores[1][best_index],
-                             combs[best_index]]
+                if not best_index:
+                    if len(indices) == 1:
+                        if score1 < .002:
+                            best_index = 1
+                    elif ab_scores[i] < .3:
+                        best_index = i
+                else:
+                    if dist_scores[best_index] > score1:
+                        if len(indices) == 1:
+                            if score1 < .002:
+                                best_index = 1
+                        elif ab_scores[i] < .3:
+                            best_index = i
+
+            if best_index is not None:
+                best_indices = list(combs[best_index])
+                best_masses = []
+                for index in best_indices:
+                    if index != -1:
+                        best_masses.append(masses[index])
+                    else:
+                        best_masses.append(-1)
+                elements[key] = [dist_scores[best_index],
+                                 ab_scores[best_index], best_masses]
 
         return elements
+
+    def compare_idrs(self, indices, element, masses, best_idr):
+        """
+        Compares IDR of a combination of observed peaks with those of the
+        known exact Isotope Masses. Takes in the previous best observed IDR and
+        compares it with a new one.
+
+        Returns the IDR of the better observed combination as well as a boolean
+        indicating whether it changed.
+
+        Arguments --------
+        indices: list of indices in masses for new combination of peaks
+        element: name of element being checked
+        masses: list of spectrum peak masses
+        best_idr: previous best combination's IDR or None
+        """
+        curr_masses = list(np.array(masses)[list(indices)])
+        idr = InterPeakDistanceRatio(curr_masses, element)
+        changed = False
+        if best_idr:
+            isotopes = self._isotopes[element]
+            isotopes = [y for x, y in zip(indices, isotopes) if x != -1]
+            known_idr = InterPeakDistanceRatio(isotopes, element)
+            total_diff_curr = sum(idr.get_dists(known_idr))
+            total_diff_prev = sum(best_idr.get_dists(known_idr))
+            if total_diff_curr < total_diff_prev:
+                best_idr = idr
+                changed=True
+        else:
+            best_idr = idr
+            changed = True
+
+        return best_idr, changed
 
     @staticmethod
     def calc_vector_distance(observed, expected):
@@ -170,7 +245,7 @@ class IsotopeFinder:
         return np.sqrt(np.sum(dists))
 
     @staticmethod
-    def calc_weighted_mean_std_sum(values, w1=1, w2=2):
+    def calc_weighted_mean_std_sum(values, w1=1, w2=1):
         """
         Returns the weighted sum of the mean and standard deviation of the
         observed abundance ratios or distances of a set of peaks.
@@ -222,3 +297,18 @@ class IsotopeFinder:
                 dists.append(distances[i])
                 abunds.append(abundances[i])
         return inds, dists, abunds
+
+    @staticmethod
+    def check_abundance_order(indices, intensities):
+        """
+        Returns True of intensities sorted by height descending match up
+        with the initial passed in indices order. If so, the spectrum is
+        probably a good match. Otherwise returns false
+
+        Arguments -------
+        indices: list of indices of peaks
+        intensities: list of intensity for every peak in spectrum.
+        """
+        counts = [intensities[x] for x in indices if x != -1]
+        ordered = sorted(counts, reverse=True)
+        return counts == ordered

@@ -7,6 +7,124 @@ import pandas as pd
 from data_generation import get_frags, mass_formula, get_isotope_data
 
 
+def get_peaks(data):
+    """
+    Combine all peaks in data together into a single super spectrum.
+
+    Returns a 1d numpy array of the peaks
+    """
+    peaks = []
+    for row in data.itertuples():
+        peaks += row.masses
+    peaks = sorted(peaks)
+    return np.array(peaks)
+
+
+def get_lower_bound(peaks, num, step_size=.01, delta_thresh=.1, max_prop=.8,
+                    min_prop=.5):
+    """
+    Returns a lower bound value for a single no peak zone range.
+
+    Finds the lower bound by either including a proportion equal to prop_stop
+    of peaks between num - 1 and num - .5 or if it finds a tail in the
+    distribution of peaks, it stops early.
+
+    Arguments -------
+    peaks: np.array of all peaks in dataset
+    num: integer, whole number above NPZ range, i.e 9 for NPZ btw 8-9
+    step_size: step size
+    delta_thresh: Rate of change in proportion of peaks below which the
+    algorithm determines itself to be in a tail of the distribution
+    max_prop: Max proportion of peaks to include under lower bound
+    min_prop: Proportion of peaks under lower bound beyond which the
+    algorithm can stop on a tail of the peak distribution.
+    """
+    low_bound = num - 1
+    low_range = peaks[(peaks > num - 1) & (peaks < num - .5)]
+    change = step_size
+    prev = 0
+    prop = len(low_range[low_range <= low_bound + change]) / len(low_range)
+    while prop < max_prop:
+        low_bound += change
+        delta = prop - prev
+        if delta < delta_thresh and prop > min_prop:
+            break
+        prop = len(low_range[low_range <= low_bound + change]) / len(low_range)
+    return low_bound
+
+
+def get_upper_bound(peaks, num, step_size=.01, delta_thresh = .1, max_prop=.75,
+                    min_prop=.5):
+    """
+    Returns an upper bound value for a single no peak zone range.
+
+    Finds the upper bound by either including a proportion equal to prop_stop
+    of peaks between num and num - .5 or if it finds a tail in the
+    distribution of peaks, it stops early.
+
+    Arguments -------
+    peaks: np.array of all peaks in dataset
+    num: integer, whole number above NPZ range, i.e 9 for NPZ btw 8-9
+    step_size: step size
+    delta_thresh: Rate of change in proportion of peaks below which the
+    algorithm determines itself to be in a tail of the distribution
+    max_prop: Max proportion of peaks to include above upper bound
+    min_prop: Proportion of peaks above upper bound beyond which the
+    algorithm can stop on a tail of the peak distribution.
+    """
+    high_bound = num
+    high_range = peaks[(peaks > num - .5) & (peaks < num)]
+    change = step_size
+    prev = 0
+    prop = len(high_range[high_range >= high_bound - change]) / len(high_range)
+    while prop < max_prop:
+        high_bound -= change
+        delta = prop - prev
+        if delta < delta_thresh and prop > min_prop:
+            break
+        prop = len(high_range[high_range >= high_bound - change]) / len(high_range)
+    return high_bound
+
+
+def get_empirical_npz(peaks, size, params_upper, params_lower):
+    """
+    Finds a NPZ for every range between 0 and size.
+
+    Returns a list of NPZ ranges.
+
+    Arguments -------
+    peaks: np.array of all peaks in dataset
+    size: how many npz ranges to generate
+    """
+    ranges = [[] for x in range(size)]
+    for num in range(1, size + 1):
+        if num < 30:
+            low = get_lower_bound(peaks, num, min_prop=0.2)
+            up = get_upper_bound(peaks, num, min_prop=0.2)
+        else:
+            low = get_lower_bound(peaks, num, *params_lower)
+            up = get_upper_bound(peaks, num, *params_upper)
+        ranges[num - 1].append(low)
+        ranges[num - 1].append(up)
+    return ranges
+
+
+def get_empirical_ranges(data, size, params_upper, params_lower):
+    """
+    Gets list of peaks from data, uses list of peaks to get NPZs for all ranges
+    between 0 and size.
+
+    Returns a list of NPZ ranges.
+
+    Arguments -------
+    peaks: np.array of all peaks in dataset
+    size: how many npz ranges to generate
+    """
+    peaks = get_peaks(data)
+    ranges = get_empirical_npz(peaks, size, params_upper, params_lower)
+    return ranges
+
+
 def get_ranges(mass_lists: pd.Series, mass_limit: int, negative=False) -> list:
     """
     Creates list of No Peak Zones from 1 Dalton to mass_limit Daltons.
@@ -45,11 +163,14 @@ def get_ranges(mass_lists: pd.Series, mass_limit: int, negative=False) -> list:
     return ranges
 
 
-def get_ppm(mass, fragment):
+def get_ppm(mass, fragment, abs_val=True):
     """
     Calculate PPM separation between a mass and a fragment
     """
-    ppm = 1e6 * abs(mass - fragment)
+    if abs_val:
+        ppm = 1e6 * abs(mass - fragment)
+    else:
+        ppm = 1e6 * (mass - fragment)
     if mass != 0:
         ppm /= mass
     return ppm
@@ -94,8 +215,9 @@ def get_tallest_per_nominal_mass(masses, intensities) -> tuple:
             curr_nom_mass = round(mass)
             max_height_curr_nom_mass = intensities[i]
             max_index = i
-    new_masses.append(masses[max_index])
-    new_intensities.append(intensities[max_index])
+    if max_index:
+        new_masses.append(masses[max_index])
+        new_intensities.append(intensities[max_index])
 
     return new_masses, new_intensities
 
@@ -160,7 +282,11 @@ def get_suspicious_peaks(masses, ranges, thresh=0.1, mass_limit=717) -> tuple:
     a = np.array(masses)
     a = a[a < mass_limit]
     b = np.array(susses)
-    return a[(b > thresh)], np.mean(susses)
+
+    if len(susses) > 0:
+        return a[(b > thresh)], np.mean(susses)
+    else:
+        return a[(b > thresh)], 0
 
 
 def calc_npz_score(masses, intensities, ranges, thresh=0.1) -> float:
@@ -211,7 +337,7 @@ def calc_npz_stats(masses, intensities, ranges, mass_limit=717) -> tuple:
 
 
 def calc_fragment_matches(masses, frags, threshes=(0.003, 0.007),
-                          ab=True, index=False) -> tuple:
+                          ab=True, index=False, ppm=False) -> tuple:
     """
     Determines which elemental / compound masses correspond
     to actual spectra masses and returns both the fragments
@@ -230,6 +356,8 @@ def calc_fragment_matches(masses, frags, threshes=(0.003, 0.007),
     default .003 dalton/amu
     ab: whether to use absolute value for calculated distances, affects
         the average distance per spectrum.
+    ppm: (Optional) Boolean, if True calculates separation distance in parts
+    per million instead of AMU / Da, default is False
     """
     stats = [[[] for x in range(3)] for y in range(len(threshes))]
     if index:
@@ -258,10 +386,14 @@ def calc_fragment_matches(masses, frags, threshes=(0.003, 0.007),
                     if abs(dist) < threshes[j]:
                         stats[j][0].append(mass)
                         stats[j][1].append(frags[i])
-                        if ab:
-                            stats[j][2].append(abs(frags[i] - mass))
+                        if not ppm:
+                            if ab:
+                                stats[j][2].append(abs(frags[i] - mass))
+                            else:
+                                stats[j][2].append((frags[i] - mass))
                         else:
-                            stats[j][2].append((frags[i] - mass))
+                            stats[j][2].append(get_ppm(mass, frags[i], ab))
+
                         if index:
                             stats[j][3].append(masses.index(mass))
             elif dist > 0:  # positive dist
@@ -302,7 +434,7 @@ def get_closest(i, frags, mass) -> int:
     return i
 
 
-def calc_spectrum_stats(data, frag_loc, iso_loc, threshes=(0.003, 0.007),
+def calc_spectrum_stats(data, frags, ranges, threshes=(0.003, 0.007),
                         inplace=False):
     """
     Use fragment library and the No Peak Zone to calculate descriptive
@@ -314,22 +446,16 @@ def calc_spectrum_stats(data, frag_loc, iso_loc, threshes=(0.003, 0.007),
 
     Arguments -------
     data: dataframe with spectra peak data
-    frag_loc: optional file loc of fragment database
+    frags: list of all common mass fragments
+    ranges: lists of npz ranges
     threshes: data structure with 2 thresholds in amu for matching fragments at
     low and high thresholds.
+    inplace: bool, if True returns nothing and modifies data instead
     """
     if not inplace:
         df = data.copy()
     else:
         df = data
-    try:
-        frags = get_frags(frag_loc)['FragmentMass']
-    except FileNotFoundError:
-        raise Exception('Invalid frag_loc, file not found.')
-    try:
-        ranges = get_ranges(get_isotope_data(iso_loc)['Isotope Masses'], 717)
-    except FileNotFoundError:
-        raise Exception("Invalid iso_loc, file not found.")
 
     dists_low_thresh = []
     stds_low_thresh = []
