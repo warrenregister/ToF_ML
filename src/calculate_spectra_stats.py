@@ -109,10 +109,9 @@ def get_empirical_npz(peaks, size, params_upper, params_lower):
     return ranges
 
 
-def get_empirical_ranges(data, size, params_upper, params_lower):
+def get_empirical_ranges(peaks, size, params_upper, params_lower):
     """
-    Gets list of peaks from data, uses list of peaks to get NPZs for all ranges
-    between 0 and size.
+    Uses list of peaks to get NPZs for all ranges between 0 and size.
 
     Returns a list of NPZ ranges.
 
@@ -120,7 +119,6 @@ def get_empirical_ranges(data, size, params_upper, params_lower):
     peaks: np.array of all peaks in dataset
     size: how many npz ranges to generate
     """
-    peaks = get_peaks(data)
     ranges = get_empirical_npz(peaks, size, params_upper, params_lower)
     return ranges
 
@@ -582,7 +580,8 @@ def recalibrate(peak1, flight_time1, loc, flight_time2) -> tuple:
 
 
 def simulate_calibration_mistake(masses, channels, slope, offset,
-                                 bin_size, start_time, changes=False) -> tuple:
+                                 bin_size, start_time, changes=False, mu=.015,
+                                 sigma_2=.01) -> tuple:
     """
     In order to create more realistic errors, this function searches spectra for
     good matches nearby other peaks, chooses sets that are relatively far apart
@@ -600,13 +599,18 @@ def simulate_calibration_mistake(masses, channels, slope, offset,
     start_time: start flight time
     changes: (Optional) if True returns changes to slope offset instead of new
     values, default False
+    mu: mean value of uniform error distribution, default .015
+    sigma_2: standard deviation of uniform error distribution, default .01
     """
     arr = np.array(masses)
     peak1 = arr[arr>11][0]
     time1 = channels[masses.index(peak1)] * .001 * bin_size + start_time
     peak2 = arr[arr > peak1 + 20][0]
-    mult = -1 if np.random.randint(0, 10, 1) <= 4 else 1
-    e = np.random.uniform(.01, .0015, 1)[0] * mult
+    mult = -1 if np.random.randint(0, 10, 1)[0] <= 4 else 1
+    e = 0
+    while e < .005:
+        e = np.random.uniform(mu, sigma_2, 1)[0]
+    e *= mult
     time2 = (np.sqrt(peak2 + e) - offset) / slope
     new_slope, new_offset = recalibrate(peak1, time1, peak2, time2)
     if changes:

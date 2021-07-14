@@ -6,7 +6,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from lightgbm import LGBMClassifier
 
+
 def get_best_params_lgbm(X, y):
+    """
+    Returns best parameters found for the lgbm classifier model on the dataset
+    X, y using sklearn's GridSearchCV.Also returns the score of the best model.
+
+    Arguments -------
+    X: Features
+    y: labels
+    """
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33)
     lgbm = LGBMClassifier()
     parameters = {'learning_rate':[0.01, 0.1, 0.2],
@@ -20,6 +29,14 @@ def get_best_params_lgbm(X, y):
 
 
 def get_best_params_rfc(X, y):
+    """
+    Returns best parameters found for the rf classifier model on the dataset
+    X, y using sklearn's GridSearchCV.Also returns the score of the best model.
+
+    Arguments -------
+    X: Features
+    y: labels
+    """
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33)
     rfc = RandomForestClassifier()
     parameters = {'criterion':('gini', 'entropy'), 'n_estimators':[75,90, 150],
